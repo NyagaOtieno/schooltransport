@@ -1,0 +1,44 @@
+{
+  "name": "goshule-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:generate": "prisma generate",
+    "prisma:studio": "prisma studio",
+    "prisma:seed": "node prisma/seed.js",
+    "seed": "node prisma/seed.js",
+    "reset": "prisma migrate reset --force --skip-generate --skip-seed && npm run prisma:migrate && npm run seed"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "prisma": "^5.22.0"
+  },
+  "description": "Backend for Goshule project using Prisma, Express, and Neon Postgres",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NyagaOtieno/track.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/NyagaOtieno/track/issues"
+  },
+  "homepage": "https://github.com/NyagaOtieno/track#readme"
+}
