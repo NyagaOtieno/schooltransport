@@ -16,8 +16,22 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: "All required fields must be provided" });
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
-    if (existingUser) return res.status(409).json({ error: "User already exists" });
+    // Check if email or phone already exists within the same school
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        schoolId,
+        OR: [
+          { email },
+          { phone }
+        ]
+      }
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        error: "Email or phone already exists for this school. You can only update the existing user."
+      });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 

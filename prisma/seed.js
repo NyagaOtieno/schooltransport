@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@prisma/client'; 
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -21,69 +21,85 @@ async function main() {
     },
   });
 
+  // Helper function to create user with unique email/phone per school
+  async function createUser({ name, email, phone, password, role, schoolId }) {
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        schoolId,
+        OR: [{ email }, { phone }],
+      },
+    });
+
+    if (existingUser) {
+      console.log(
+        `⚠️ Skipping creation of ${role} ${name}: email or phone already exists for this school`
+      );
+      return existingUser;
+    }
+
+    return await prisma.user.create({
+      data: {
+        name,
+        email,
+        phone,
+        password: await bcrypt.hash(password, 10),
+        role,
+        schoolId,
+      },
+    });
+  }
+
   // Create Drivers
-  const driver1 = await prisma.user.create({
-    data: {
-      name: "John Driver",
-      email: "john.driver@example.com",
-      password: await bcrypt.hash("driver123", 10),
-      role: "DRIVER",
-      schoolId: school.id,
-    },
+  const driver1 = await createUser({
+    name: "John Driver",
+    email: "john.driver@example.com",
+    password: "driver123",
+    role: "DRIVER",
+    schoolId: school.id,
   });
 
-  const driver2 = await prisma.user.create({
-    data: {
-      name: "Mike Driver",
-      email: "mike.driver@example.com",
-      password: await bcrypt.hash("driver123", 10),
-      role: "DRIVER",
-      schoolId: school.id,
-    },
+  const driver2 = await createUser({
+    name: "Mike Driver",
+    email: "mike.driver@example.com",
+    password: "driver123",
+    role: "DRIVER",
+    schoolId: school.id,
   });
 
   // Create Assistants
-  const assistant1 = await prisma.user.create({
-    data: {
-      name: "Alice Assistant",
-      email: "alice.assistant@example.com",
-      password: await bcrypt.hash("assistant123", 10),
-      role: "ASSISTANT",
-      schoolId: school.id,
-    },
+  const assistant1 = await createUser({
+    name: "Alice Assistant",
+    email: "alice.assistant@example.com",
+    password: "assistant123",
+    role: "ASSISTANT",
+    schoolId: school.id,
   });
 
-  const assistant2 = await prisma.user.create({
-    data: {
-      name: "Bob Assistant",
-      email: "bob.assistant@example.com",
-      password: await bcrypt.hash("assistant123", 10),
-      role: "ASSISTANT",
-      schoolId: school.id,
-    },
+  const assistant2 = await createUser({
+    name: "Bob Assistant",
+    email: "bob.assistant@example.com",
+    password: "assistant123",
+    role: "ASSISTANT",
+    schoolId: school.id,
   });
 
-  // Create Parents (as Users with role = PARENT)
-  const parent1 = await prisma.user.create({
-    data: {
-      name: "Jane Parent",
-      email: "jane.parent@example.com",
-      phone: "0700000001",
-      password: await bcrypt.hash("parent123", 10),
-      role: "PARENT",
-      schoolId: school.id,
-    },
+  // Create Parents
+  const parent1 = await createUser({
+    name: "Jane Parent",
+    email: "jane.parent@example.com",
+    phone: "0700000001",
+    password: "parent123",
+    role: "PARENT",
+    schoolId: school.id,
   });
 
-  const parent2 = await prisma.user.create({
-    data: {
-      name: "Paul Parent",
-      email: "paul.parent@example.com",
-      phone: "0700000002",
-      password: await bcrypt.hash("parent123", 10),
-      role: "PARENT",
-      schoolId: school.id,
-    },
+  const parent2 = await createUser({
+    name: "Paul Parent",
+    email: "paul.parent@example.com",
+    phone: "0700000002",
+    password: "parent123",
+    role: "PARENT",
+    schoolId: school.id,
   });
 
   // Create Bus
