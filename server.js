@@ -1,8 +1,8 @@
 import dotenv from "dotenv";
 dotenv.config(); // ✅ Load .env first!
 
-import app from "./app.js";
-import prisma from "./middleware/prisma.js";
+import app from "src/app.js";
+import prisma from "src/middleware/prisma.js";
 
 const PORT = process.env.PORT || 5000;
 

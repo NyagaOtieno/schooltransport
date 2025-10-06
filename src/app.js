@@ -19,7 +19,8 @@ const app = express();
 
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: "10mb" }));
+app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
 
 // Routes
 app.use("/api/auth", authRoutes);
@@ -32,7 +33,7 @@ app.use("/api/drivers", driverRoutes);
 app.use("/api/assistants", assistantRoutes);
 app.use("/api/manifests", manifestRoutes);
 
-// Health check route
+// Health check route (important for Railway)
 app.get("/", (req, res) => {
   res.json({ message: "API is running 🚀" });
 });
