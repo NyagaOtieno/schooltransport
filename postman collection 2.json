@@ -1,0 +1,239 @@
+{
+  "info": {
+    "_postman_id": "d5e92a9f-7f1b-4c6e-a23b-8f6f1b8c9e4d",
+    "name": "Student Bus Tracking API - LIVE",
+    "description": "Full CRUD Postman collection for Student Bus Tracking System (Live on Railway)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john.driver@example.com\",\n  \"password\": \"driver123\"\n}"
+            },
+            "url": {
+              "raw": "https://schooltransport-production.up.railway.app/api/auth/login",
+              "protocol": "https",
+              "host": ["schooltransport-production","up","railway","app"],
+              "path": ["api","auth","login"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get all users",
+          "request": {
+            "method": "GET",
+            "url": "https://schooltransport-production.up.railway.app/api/users"
+          }
+        },
+        {
+          "name": "Create user",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"New User\",\n  \"email\": \"new.user@example.com\",\n  \"password\": \"password123\",\n  \"role\": \"PARENT\",\n  \"schoolId\": 1\n}"
+            },
+            "url": "https://schooltransport-production.up.railway.app/api/users"
+          }
+        },
+        {
+          "name": "Get user by ID",
+          "request": {
+            "method": "GET",
+            "url": "https://schooltransport-production.up.railway.app/api/users/1"
+          }
+        },
+        {
+          "name": "Update user",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated User\"\n}"
+            },
+            "url": "https://schooltransport-production.up.railway.app/api/users/1"
+          }
+        },
+        {
+          "name": "Delete user",
+          "request": {
+            "method": "DELETE",
+            "url": "https://schooltransport-production.up.railway.app/api/users/1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Schools",
+      "item": [
+        {
+          "name": "Get all schools",
+          "request": { "method": "GET", "url": "https://schooltransport-production.up.railway.app/api/schools" }
+        },
+        {
+          "name": "Create school",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sunrise School\",\n  \"address\": \"456 Main St\",\n  \"phone\": \"0712345679\"\n}"
+            },
+            "url": "https://schooltransport-production.up.railway.app/api/schools"
+          }
+        },
+        {
+          "name": "Get school by ID",
+          "request": { "method": "GET", "url": "https://schooltransport-production.up.railway.app/api/schools/1" }
+        },
+        {
+          "name": "Update school",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated School Name\"\n}"
+            },
+            "url": "https://schooltransport-production.up.railway.app/api/schools/1"
+          }
+        },
+        {
+          "name": "Delete school",
+          "request": { "method": "DELETE", "url": "https://schooltransport-production.up.railway.app/api/schools/1" }
+        }
+      ]
+    },
+    {
+      "name": "Buses",
+      "item": [
+        {
+          "name": "Get all buses",
+          "request": { "method": "GET", "url": "https://schooltransport-production.up.railway.app/api/buses" }
+        },
+        {
+          "name": "Create bus",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Evening Express\",\n  \"plateNumber\": \"KBB456Y\",\n  \"capacity\": 35,\n  \"route\": \"Route B\",\n  \"driverId\": 2,\n  \"assistantId\": 3,\n  \"schoolId\": 1\n}"
+            },
+            "url": "https://schooltransport-production.up.railway.app/api/buses"
+          }
+        },
+        {
+          "name": "Get bus by ID",
+          "request": { "method": "GET", "url": "https://schooltransport-production.up.railway.app/api/buses/1" }
+        },
+        {
+          "name": "Update bus",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Updated Bus Name\"\n}" },
+            "url": "https://schooltransport-production.up.railway.app/api/buses/1"
+          }
+        },
+        {
+          "name": "Delete bus",
+          "request": { "method": "DELETE", "url": "https://schooltransport-production.up.railway.app/api/buses/1" }
+        }
+      ]
+    },
+    {
+      "name": "Students",
+      "item": [
+        {
+          "name": "Get all students",
+          "request": { "method": "GET", "url": "https://schooltransport-production.up.railway.app/api/students" }
+        },
+        {
+          "name": "Create student",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Oliver Student\",\n  \"grade\": \"Grade 3\",\n  \"latitude\": -1.3150,\n  \"longitude\": 36.8250,\n  \"busId\": 1,\n  \"parentId\": 1,\n  \"schoolId\": 1\n}"
+            },
+            "url": "https://schooltransport-production.up.railway.app/api/students"
+          }
+        },
+        {
+          "name": "Get student by ID",
+          "request": { "method": "GET", "url": "https://schooltransport-production.up.railway.app/api/students/1" }
+        },
+        {
+          "name": "Update student",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"grade\": \"Grade 4\"\n}" },
+            "url": "https://schooltransport-production.up.railway.app/api/students/1"
+          }
+        },
+        {
+          "name": "Delete student",
+          "request": { "method": "DELETE", "url": "https://schooltransport-production.up.railway.app/api/students/1" }
+        }
+      ]
+    },
+    {
+      "name": "Manifests",
+      "item": [
+        {
+          "name": "Get all manifests",
+          "request": { "method": "GET", "url": "https://schooltransport-production.up.railway.app/api/manifests" }
+        },
+        {
+          "name": "Create manifest",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"studentId\": 1,\n  \"busId\": 1,\n  \"assistantId\": 3,\n  \"status\": \"CHECKED_IN\",\n  \"latitude\": -1.2921,\n  \"longitude\": 36.8219\n}"
+            },
+            "url": "https://schooltransport-production.up.railway.app/api/manifests"
+          }
+        },
+        {
+          "name": "Get manifest by ID",
+          "request": { "method": "GET", "url": "https://schooltransport-production.up.railway.app/api/manifests/1" }
+        },
+        {
+          "name": "Update manifest",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"CHECKED_OUT\"\n}" },
+            "url": "https://schooltransport-production.up.railway.app/api/manifests/1"
+          }
+        },
+        {
+          "name": "Delete manifest",
+          "request": { "method": "DELETE", "url": "https://schooltransport-production.up.railway.app/api/manifests/1" }
+        }
+      ]
+    }
+  ]
+}
