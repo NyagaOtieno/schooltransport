@@ -6,7 +6,8 @@ import prisma from "./src/middleware/prisma.js";
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+// ✅ Important: Bind to 0.0.0.0 so Railway can reach it
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
 
