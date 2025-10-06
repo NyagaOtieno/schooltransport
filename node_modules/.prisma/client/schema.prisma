@@ -23,10 +23,10 @@ model School {
 model User {
   id                 Int        @id @default(autoincrement())
   name               String
-  email              String?    @unique
+  email              String?
   password           String
   createdAt          DateTime   @default(now())
-  phone              String?    @unique
+  phone              String?
   schoolId           Int
   updatedAt          DateTime   @updatedAt
   role               Role
@@ -35,6 +35,9 @@ model User {
   assistantManifests Manifest[] @relation("AssistantManifest")
   students           Student[]
   school             School     @relation(fields: [schoolId], references: [id])
+
+  @@unique([email, schoolId])
+  @@unique([phone, schoolId])
 }
 
 model Bus {

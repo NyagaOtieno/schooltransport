@@ -46,7 +46,6 @@ router.post("/register", async (req, res) => {
       },
     });
 
-    // Exclude password from response
     const { password: _, ...userWithoutPassword } = user;
 
     res.status(201).json({ message: "User registered successfully", user: userWithoutPassword });
@@ -66,7 +65,8 @@ router.post("/login", async (req, res) => {
     if (!email || !password)
       return res.status(400).json({ error: "Email and password are required" });
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    // Changed from findUnique to findFirst to support multiple schools
+    const user = await prisma.user.findFirst({ where: { email } });
     if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
     const valid = await bcrypt.compare(password, user.password);
@@ -78,7 +78,6 @@ router.post("/login", async (req, res) => {
       { expiresIn: "7d" }
     );
 
-    // Exclude password from response
     const { password: _, ...userWithoutPassword } = user;
 
     res.json({
