@@ -1,25 +1,52 @@
 import dotenv from "dotenv";
-dotenv.config(); // ✅ Load environment variables first
+dotenv.config(); // Load environment variables first
 
 import app from "./src/app.js";
 import prisma from "./src/middleware/prisma.js";
 
-// Use Railway-assigned port or fallback to 5000
 const PORT = process.env.PORT || 5000;
 
-// Function to start the server
+// Helper: retry Prisma connection a few times
+const connectPrisma = async (retries = 5, delay = 2000) => {
+  for (let i = 1; i <= retries; i++) {
+    try {
+      await prisma.$connect();
+      console.log("✅ Prisma connected successfully");
+      return;
+    } catch (err) {
+      console.error(`⚠️ Prisma connection attempt ${i} failed:`, err.message);
+      if (i === retries) throw err;
+      console.log(`⏳ Retrying in ${delay / 1000}s...`);
+      await new Promise(res => setTimeout(res, delay));
+    }
+  }
+};
+
+// Graceful shutdown function
+const shutdown = async (server, exitCode = 0) => {
+  console.log("🛑 Shutting down server...");
+  if (server) server.close(() => console.log("🛑 HTTP server closed"));
+
+  try {
+    await prisma.$disconnect();
+    console.log("🛑 Prisma Client disconnected");
+  } catch (err) {
+    console.error("❌ Error disconnecting Prisma:", err);
+  }
+
+  process.exit(exitCode);
+};
+
+// Start the server
 const startServer = async () => {
   try {
-    // ✅ Test DB connection before starting
-    await prisma.$connect();
-    console.log("✅ Prisma connected successfully");
+    await connectPrisma(); // Attempt Prisma connection with retries
 
-    // ✅ Bind to 0.0.0.0 so Railway (or any host) can reach it
     const server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
     });
 
-    // Handle unexpected errors in requests
+    // Handle unexpected errors
     process.on("uncaughtException", (err) => {
       console.error("❌ Uncaught Exception:", err);
       shutdown(server, 1);
@@ -40,20 +67,4 @@ const startServer = async () => {
   }
 };
 
-// Graceful shutdown function
-const shutdown = async (server, exitCode = 0) => {
-  console.log("🛑 Shutting down server...");
-  if (server) server.close(() => console.log("🛑 HTTP server closed"));
-
-  try {
-    await prisma.$disconnect();
-    console.log("🛑 Prisma Client disconnected");
-  } catch (err) {
-    console.error("❌ Error disconnecting Prisma:", err);
-  }
-
-  process.exit(exitCode);
-};
-
-// Start the server
 startServer();
