@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config(); // ✅ Load .env first!
+
 import app from "./app.js";
 import prisma from "./middleware/prisma.js";
 
