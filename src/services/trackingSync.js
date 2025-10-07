@@ -6,6 +6,9 @@ const prisma = new PrismaClient();
 const LOC8_API_URL = "https://myfleet.track-loc8.com/api/v1/unit.json";
 const LOC8_API_KEY = "44e824d4f70647af1bb9a314b4de7e73951c8ad6";
 
+// -----------------------------
+// Sync live locations from tracker
+// -----------------------------
 export const syncLiveLocations = async () => {
   console.log("🚀 Starting live location sync...");
 
@@ -24,12 +27,7 @@ export const syncLiveLocations = async () => {
     for (const unit of units) {
       try {
         // Validate coordinates
-        if (
-          typeof unit.lat !== "number" ||
-          typeof unit.lng !== "number" ||
-          !unit.lat ||
-          !unit.lng
-        ) {
+        if (typeof unit.lat !== "number" || typeof unit.lng !== "number" || !unit.lat || !unit.lng) {
           continue;
         }
 
@@ -73,7 +71,57 @@ export const syncLiveLocations = async () => {
   } catch (error) {
     console.error("❌ Error syncing live locations:", error.message);
     return { success: false, error: error.message };
-  } finally {
-    await prisma.$disconnect();
+  }
+};
+
+// -----------------------------
+// Get all live student locations
+// -----------------------------
+export const getLiveLocations = async () => {
+  try {
+    const locations = await prisma.liveLocation.findMany({
+      orderBy: { lastUpdate: "desc" },
+    });
+    return locations;
+  } catch (err) {
+    console.error("❌ Failed to fetch live locations:", err.message);
+    return [];
+  }
+};
+
+// -----------------------------
+// Get all bus locations
+// -----------------------------
+export const getBusLocations = async () => {
+  try {
+    const buses = await prisma.bus.findMany({
+      include: { driver: true, assistant: true },
+    });
+
+    // Merge with latest live location if exists
+    const busLocations = await Promise.all(
+      buses.map(async (bus) => {
+        const live = await prisma.liveLocation.findUnique({
+          where: { vehicleReg: bus.plateNumber },
+        });
+        return {
+          busId: bus.id,
+          plateNumber: bus.plateNumber,
+          driverId: bus.driverId,
+          assistantId: bus.assistantId,
+          lat: live?.lat || null,
+          lng: live?.lng || null,
+          direction: live?.direction || null,
+          speed: live?.speed || null,
+          movementState: live?.movementState || null,
+          lastUpdate: live?.lastUpdate || null,
+        };
+      })
+    );
+
+    return busLocations;
+  } catch (err) {
+    console.error("❌ Failed to fetch bus locations:", err.message);
+    return [];
   }
 };
