@@ -27,13 +27,24 @@ export const syncLiveLocations = async () => {
     for (const unit of units) {
       try {
         // Validate coordinates
-        if (!unit.lat || !unit.lng) continue;
+        if (typeof unit.lat !== "number" || typeof unit.lng !== "number" || !unit.lat || !unit.lng) {
+          continue;
+        }
 
         const lastUpdate = new Date(unit.last_update || now);
 
-        // Map tracker 'number' to local 'vehicleReg'
+        // Normalize vehicleReg
+        const vehicleReg = (unit.number || "Unknown").trim();
+
+        // Optional: link to bus if exists
+        const bus = await prisma.bus.findUnique({
+          where: { plateNumber: vehicleReg },
+        });
+        const busId = bus?.id || null;
+
         const payload = {
-          vehicleReg: unit.number || "Unknown",
+          vehicleReg,
+          busId,
           lat: parseFloat(unit.lat),
           lng: parseFloat(unit.lng),
           direction: parseFloat(unit.direction || 0),
@@ -43,7 +54,7 @@ export const syncLiveLocations = async () => {
         };
 
         await prisma.liveLocation.upsert({
-          where: { vehicleReg: payload.vehicleReg },
+          where: { vehicleReg },
           update: payload,
           create: payload,
         });
@@ -87,9 +98,9 @@ export const getBusLocations = async () => {
 
     const busLocations = await Promise.all(
       buses.map(async (bus) => {
-        // Match bus.plateNumber with tracker 'number' stored in liveLocation.vehicleReg
-        const live = await prisma.liveLocation.findFirst({
-          where: { vehicleReg: bus.plateNumber },
+        // Match bus.plateNumber with liveLocation.vehicleReg
+        const live = await prisma.liveLocation.findUnique({
+          where: { vehicleReg: bus.plateNumber.trim() },
         });
 
         return {
