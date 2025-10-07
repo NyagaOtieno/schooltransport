@@ -1,3 +1,4 @@
+// src/services/trackingSync.js
 import axios from "axios";
 import { PrismaClient } from "@prisma/client";
 
@@ -33,18 +34,17 @@ export const syncLiveLocations = async () => {
 
         const lastUpdate = new Date(unit.last_update || now);
 
-        // Normalize vehicleReg
+        // Normalize vehicleReg from tracker
         const vehicleReg = (unit.number || "Unknown").trim();
 
-        // Optional: link to bus if exists
-        const bus = await prisma.bus.findUnique({
+        // Link to bus if exists
+        const bus = await prisma.bus.findFirst({
           where: { plateNumber: vehicleReg },
         });
-        const busId = bus?.id || null;
 
         const payload = {
           vehicleReg,
-          busId,
+          busId: bus?.id ?? null,
           lat: parseFloat(unit.lat),
           lng: parseFloat(unit.lng),
           direction: parseFloat(unit.direction || 0),
@@ -53,6 +53,7 @@ export const syncLiveLocations = async () => {
           lastUpdate,
         };
 
+        // Upsert live location
         await prisma.liveLocation.upsert({
           where: { vehicleReg },
           update: payload,
@@ -98,9 +99,10 @@ export const getBusLocations = async () => {
 
     const busLocations = await Promise.all(
       buses.map(async (bus) => {
-        // Match bus.plateNumber with liveLocation.vehicleReg
-        const live = await prisma.liveLocation.findUnique({
-          where: { vehicleReg: bus.plateNumber.trim() },
+        // Match by busId for accuracy
+        const live = await prisma.liveLocation.findFirst({
+          where: { busId: bus.id },
+          orderBy: { lastUpdate: "desc" },
         });
 
         return {
