@@ -554,7 +554,7 @@
         "header": [
           { "key": "Authorization", "value": "Bearer {{token}}" }
         ],
-        "url": "https://schooltransport-production.up.railway.app/api/live-locations"
+        "url": "https://schooltransport-production.up.railway.app/api/tracking/live-locations"
       }
     },
     {
@@ -564,7 +564,7 @@
         "header": [
           { "key": "Authorization", "value": "Bearer {{token}}" }
         ],
-        "url": "https://schooltransport-production.up.railway.app/api/live-locations/1"
+        "url": "https://schooltransport-production.up.railway.app/api/tracking/live-locations/1"
       }
     }
   ]
@@ -579,7 +579,7 @@
         "header": [
           { "key": "Authorization", "value": "Bearer {{token}}" }
         ],
-        "url": "https://schooltransport-production.up.railway.app/api/bus-locations"
+        "url": "https://schooltransport-production.up.railway.app/api/tracking/bus-locations"
       }
     },
     {
