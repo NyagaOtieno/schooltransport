@@ -26,7 +26,6 @@ export const syncLiveLocations = async () => {
 
     for (const unit of units) {
       try {
-        // Validate coordinates
         if (typeof unit.lat !== "number" || typeof unit.lng !== "number" || !unit.lat || !unit.lng) {
           continue;
         }
@@ -45,14 +44,7 @@ export const syncLiveLocations = async () => {
 
         await prisma.liveLocation.upsert({
           where: { vehicleReg: payload.vehicleReg },
-          update: {
-            lat: payload.lat,
-            lng: payload.lng,
-            direction: payload.direction,
-            speed: payload.speed,
-            movementState: payload.movementState,
-            lastUpdate: payload.lastUpdate,
-          },
+          update: payload,
           create: payload,
         });
 
