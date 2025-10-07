@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 dotenv.config(); // Load environment variables first
-
+import "./cron.js"; // put this at the top of server.js
 import app from "./src/app.js";
 import prisma from "./src/middleware/prisma.js";
 

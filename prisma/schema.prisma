@@ -20,6 +20,61 @@ model School {
   users     User[]
 }
 
+model BusLocation {
+  id           Int       @id @default(autoincrement())
+  busId        Int
+  deviceId     Int
+  lat          Float
+  lng          Float
+  direction    Int?
+  speed        Float?
+  state        String?
+  movement     String?
+  lastUpdate   DateTime
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  bus          Bus       @relation(fields: [busId], references: [id])
+}
+
+model LiveLocation {
+  id             Int       @id @default(autoincrement())
+  vehicleReg     String    @unique
+  busId          Int?      // optional link to bus
+  lat            Float
+  lng            Float
+  direction      Float
+  speed          Float?
+  movementState  String?
+  lastUpdate     DateTime
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  bus            Bus?      @relation(fields: [busId], references: [id])
+}
+
+model Notification {
+  id           Int       @id @default(autoincrement())
+  parentId     Int
+  title        String
+  message      String
+  type         String
+  sentAt       DateTime  @default(now())
+  read         Boolean   @default(false)
+
+  parent       Parent    @relation(fields: [parentId], references: [id])
+}
+
+model Parent {
+  id          Int          @id @default(autoincrement())
+  name        String
+  phone       String        @unique
+  students    Student[]
+  notifications Notification[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
 model User {
   id                 Int        @id @default(autoincrement())
   name               String
@@ -33,7 +88,7 @@ model User {
   busesAssisting     Bus[]      @relation("AssistantBus")
   busesDriven        Bus[]      @relation("DriverBus")
   assistantManifests Manifest[] @relation("AssistantManifest")
-  students           Student[]
+  students           Student[]  @relation("UserStudent")
   school             School     @relation(fields: [schoolId], references: [id])
 
   @@unique([email, schoolId])
@@ -41,21 +96,23 @@ model User {
 }
 
 model Bus {
-  id          Int        @id @default(autoincrement())
-  name        String
-  plateNumber String     @unique
-  capacity    Int
-  route       String
-  driverId    Int?
-  assistantId Int?
-  createdAt   DateTime   @default(now())
-  schoolId    Int
-  updatedAt   DateTime   @updatedAt
-  assistant   User?      @relation("AssistantBus", fields: [assistantId], references: [id])
-  driver      User?      @relation("DriverBus", fields: [driverId], references: [id])
-  school      School     @relation(fields: [schoolId], references: [id])
-  manifests   Manifest[]
-  students    Student[]
+  id             Int             @id @default(autoincrement())
+  name           String
+  plateNumber    String          @unique
+  capacity       Int
+  route          String
+  driverId       Int?
+  assistantId    Int?
+  createdAt      DateTime        @default(now())
+  schoolId       Int
+  updatedAt      DateTime        @updatedAt
+  assistant      User?           @relation("AssistantBus", fields: [assistantId], references: [id])
+  driver         User?           @relation("DriverBus", fields: [driverId], references: [id])
+  school         School          @relation(fields: [schoolId], references: [id])
+  manifests      Manifest[]
+  students       Student[]
+  liveLocations  LiveLocation[]
+  locations      BusLocation[]   // 👈 opposite side of BusLocation
 }
 
 model Student {
@@ -66,13 +123,15 @@ model Student {
   longitude Float
   busId     Int
   parentId  Int
+  userId    Int?        // 👈 to match User.students
   createdAt DateTime   @default(now())
   schoolId  Int
   updatedAt DateTime   @updatedAt
   manifests Manifest[]
   bus       Bus        @relation(fields: [busId], references: [id])
-  parent    User       @relation(fields: [parentId], references: [id])
+  parent    Parent     @relation(fields: [parentId], references: [id])
   school    School     @relation(fields: [schoolId], references: [id])
+  user      User?      @relation("UserStudent", fields: [userId], references: [id])
 }
 
 model Manifest {

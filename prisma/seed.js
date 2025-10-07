@@ -1,19 +1,24 @@
-import { PrismaClient } from '@prisma/client'; 
+import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  // Cleanup before seeding
-  await prisma.manifest.deleteMany();
-  await prisma.student.deleteMany();
-  await prisma.bus.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.school.deleteMany();
+  console.log("🧹 Cleaning up existing data...");
+
+  await prisma.manifest.deleteMany().catch(() => {});
+  await prisma.student.deleteMany().catch(() => {});
+  await prisma.bus.deleteMany().catch(() => {});
+  await prisma.parent.deleteMany().catch(() => {});
+  await prisma.user.deleteMany().catch(() => {});
+  await prisma.school.deleteMany().catch(() => {});
+
+  console.log("✅ Cleanup complete.\n");
 
   // -----------------------------
   // Create School
   // -----------------------------
+  console.log("🏫 Creating school...");
   const school = await prisma.school.create({
     data: {
       name: "Greenwood Academy",
@@ -22,26 +27,22 @@ async function main() {
       phone: "0712345678",
     },
   });
+  console.log(`✅ School created: ${school.name}\n`);
 
   // -----------------------------
-  // Helper function to create user with unique email/phone per school
+  // Helper: Create user safely
   // -----------------------------
   async function createUser({ name, email, phone, password, role, schoolId }) {
     const existingUser = await prisma.user.findFirst({
-      where: {
-        schoolId,
-        OR: [{ email }, { phone }],
-      },
+      where: { schoolId, OR: [{ email }, { phone }] },
     });
 
     if (existingUser) {
-      console.log(
-        `⚠️ Skipping creation of ${role} ${name}: email or phone already exists for this school`
-      );
+      console.log(`⚠️  Skipping ${role} '${name}': already exists`);
       return existingUser;
     }
 
-    return await prisma.user.create({
+    const user = await prisma.user.create({
       data: {
         name,
         email,
@@ -51,173 +52,189 @@ async function main() {
         schoolId,
       },
     });
+    console.log(`👤 Created ${role}: ${user.name}`);
+    return user;
   }
 
   // -----------------------------
-  // Create Drivers
+  // Create Drivers and Assistants
   // -----------------------------
-  const driver1 = await createUser({
-    name: "John Driver",
-    email: "john.driver@example.com",
-    password: "driver123",
-    role: "DRIVER",
-    schoolId: school.id,
-  });
+  console.log("\n🚌 Creating drivers and assistants...");
+  const driverNames = ["John Driver", "Mike Driver", "David Driver", "Chris Driver"];
+  const assistantNames = ["Alice Assistant", "Bob Assistant", "Carol Assistant", "Diana Assistant"];
 
-  const driver2 = await createUser({
-    name: "Mike Driver",
-    email: "mike.driver@example.com",
-    password: "driver123",
-    role: "DRIVER",
-    schoolId: school.id,
-  });
+  const drivers = [];
+  const assistants = [];
 
-  // -----------------------------
-  // Create Assistants
-  // -----------------------------
-  const assistant1 = await createUser({
-    name: "Alice Assistant",
-    email: "alice.assistant@example.com",
-    password: "assistant123",
-    role: "ASSISTANT",
-    schoolId: school.id,
-  });
+  for (let i = 0; i < driverNames.length; i++) {
+    const driver = await createUser({
+      name: driverNames[i],
+      email: `${driverNames[i].split(" ")[0].toLowerCase()}.driver@example.com`,
+      phone: `07110000${i + 1}`,
+      password: "driver123",
+      role: "DRIVER",
+      schoolId: school.id,
+    });
+    drivers.push(driver);
 
-  const assistant2 = await createUser({
-    name: "Bob Assistant",
-    email: "bob.assistant@example.com",
-    password: "assistant123",
-    role: "ASSISTANT",
-    schoolId: school.id,
-  });
+    const assistant = await createUser({
+      name: assistantNames[i],
+      email: `${assistantNames[i].split(" ")[0].toLowerCase()}.assistant@example.com`,
+      phone: `07220000${i + 1}`,
+      password: "assistant123",
+      role: "ASSISTANT",
+      schoolId: school.id,
+    });
+    assistants.push(assistant);
+  }
 
   // -----------------------------
   // Create Parents
   // -----------------------------
-  const parent1 = await createUser({
-    name: "Jane Parent",
-    email: "jane.parent@example.com",
-    phone: "0700000001",
-    password: "parent123",
-    role: "PARENT",
-    schoolId: school.id,
-  });
+  console.log("\n👨‍👩‍👧 Creating parents...");
+  const parentNames = ["Jane Parent", "Paul Parent", "Mary Parent", "Peter Parent"];
+  const dbParents = [];
 
-  const parent2 = await createUser({
-    name: "Paul Parent",
-    email: "paul.parent@example.com",
-    phone: "0700000002",
-    password: "parent123",
-    role: "PARENT",
-    schoolId: school.id,
-  });
-
-  // -----------------------------
-  // Create Bus (WITHOUT assistant initially)
-  // -----------------------------
-  const bus = await prisma.bus.create({
-    data: {
-      name: "Morning Express",
-      plateNumber: "KAA123X",
-      capacity: 40,
-      route: "Route A - City to School",
-      driverId: driver1.id,
-      schoolId: school.id,
-    },
-  });
-
-  // -----------------------------
-  // Create Students
-  // -----------------------------
-  const student1 = await prisma.student.create({
-    data: {
-      name: "Emma Student",
-      grade: "Grade 5",
-      latitude: -1.2921,
-      longitude: 36.8219,
-      busId: bus.id,
-      parentId: parent1.id,
-      schoolId: school.id,
-    },
-  });
-
-  const student2 = await prisma.student.create({
-    data: {
-      name: "Liam Student",
-      grade: "Grade 6",
-      latitude: -1.3000,
-      longitude: 36.8200,
-      busId: bus.id,
-      parentId: parent1.id,
-      schoolId: school.id,
-    },
-  });
-
-  const student3 = await prisma.student.create({
-    data: {
-      name: "Sophia Student",
-      grade: "Grade 4",
-      latitude: -1.3100,
-      longitude: 36.8300,
-      busId: bus.id,
-      parentId: parent2.id,
-      schoolId: school.id,
-    },
-  });
-
-  // -----------------------------
-  // Simulate Admin assigning assistant to the bus
-  // -----------------------------
-  const busWithAssistant = await prisma.bus.update({
-    where: { id: bus.id },
-    data: { assistantId: assistant1.id }, // Admin-assigned assistant
-  });
-
-  // -----------------------------
-  // Create Manifests AFTER assistant assignment
-  // -----------------------------
-  const manifestData = [
-    { student: student1, status: "CHECKED_IN" },
-    { student: student1, status: "CHECKED_OUT" },
-    { student: student2, status: "CHECKED_IN" },
-    { student: student3, status: "CHECKED_IN" },
-  ];
-
-  for (const entry of manifestData) {
-    // Only allow CHECKED_OUT if CHECKED_IN exists for this student
-    if (entry.status === "CHECKED_OUT") {
-      const checkedIn = await prisma.manifest.findFirst({
-        where: {
-          studentId: entry.student.id,
-          busId: busWithAssistant.id,
-          status: "CHECKED_IN",
-        },
-      });
-      if (!checkedIn) continue;
-    }
-
-    await prisma.manifest.create({
+  for (let i = 0; i < parentNames.length; i++) {
+    // Create Parent record first
+    const parent = await prisma.parent.create({
       data: {
-        studentId: entry.student.id,
-        busId: busWithAssistant.id,
-        assistantId: busWithAssistant.assistantId,
-        status: entry.status,
-        latitude: entry.student.latitude,
-        longitude: entry.student.longitude,
+        name: parentNames[i],
+        phone: `070000000${i + 1}`,
       },
+    });
+    dbParents.push(parent);
+    console.log(`✅ Parent created: ${parent.name}`);
+
+    // Optional: create corresponding User account
+    await createUser({
+      name: parentNames[i],
+      email: `${parentNames[i].split(" ")[0].toLowerCase()}.parent@example.com`,
+      phone: `070000000${i + 1}`,
+      password: "parent123",
+      role: "PARENT",
+      schoolId: school.id,
     });
   }
 
-  console.log(
-    "✅ Seeding completed successfully with school, users, bus, students, and manifests!"
-  );
+  // -----------------------------
+  // Create Buses
+  // -----------------------------
+  console.log("\n🚌 Creating multiple buses...");
+  const busData = [
+    { name: "Morning Express", plate: "KAA123X", route: "Route A - City to School" },
+    { name: "Sunrise Shuttle", plate: "KBB456Y", route: "Route B - Westlands to School" },
+    { name: "Evening Cruiser", plate: "KCC789Z", route: "Route C - South B to School" },
+    { name: "Highway Comet", plate: "KDD101A", route: "Route D - Embakasi to School" },
+  ];
+
+  const buses = [];
+
+  for (let i = 0; i < busData.length; i++) {
+    const bus = await prisma.bus.create({
+      data: {
+        name: busData[i].name,
+        plateNumber: busData[i].plate,
+        capacity: 40,
+        route: busData[i].route,
+        driverId: drivers[i].id,
+        schoolId: school.id,
+      },
+    });
+    buses.push(bus);
+    console.log(`✅ Bus created: ${bus.name} (${bus.plateNumber})`);
+  }
+
+  // -----------------------------
+  // Assign Assistants
+  // -----------------------------
+  console.log("\n🔄 Assigning assistants to buses...");
+  for (let i = 0; i < buses.length; i++) {
+    await prisma.bus.update({
+      where: { id: buses[i].id },
+      data: { assistantId: assistants[i].id },
+    });
+    console.log(`✅ Assistant ${assistants[i].name} assigned to ${buses[i].name}`);
+  }
+
+  // -----------------------------
+  // Create Students (2–3 per parent)
+  // -----------------------------
+  console.log("\n🎒 Creating students...");
+  const studentNames = [
+    "Emma Student", "Liam Student", "Sophia Student", "Noah Student",
+    "Olivia Student", "Mason Student", "Isabella Student", "Ethan Student",
+    "Ava Student", "Lucas Student", "Mia Student", "James Student"
+  ];
+
+  const allStudents = [];
+  let nameIndex = 0;
+
+  for (const parent of dbParents) {
+    const siblingCount = Math.floor(Math.random() * 2) + 2; // 2–3 students per parent
+    for (let i = 0; i < siblingCount; i++) {
+      const assignedBus = buses[(nameIndex + i) % buses.length];
+      const student = await prisma.student.create({
+        data: {
+          name: studentNames[nameIndex % studentNames.length],
+          grade: `Grade ${4 + ((nameIndex + i) % 3)}`,
+          latitude: -1.29 + Math.random() * 0.03,
+          longitude: 36.82 + Math.random() * 0.03,
+          busId: assignedBus.id,
+          parentId: parent.id,
+          schoolId: school.id,
+        },
+      });
+      allStudents.push(student);
+      console.log(`✅ Student ${student.name} assigned to ${assignedBus.name} (Parent: ${parent.name})`);
+      nameIndex++;
+    }
+  }
+
+  // -----------------------------
+  // Create Manifests
+  // -----------------------------
+  console.log("\n📋 Creating manifests...");
+  for (const student of allStudents) {
+    const bus = buses.find((b) => b.id === student.busId);
+    if (!bus) continue;
+
+    await prisma.manifest.create({
+      data: {
+        studentId: student.id,
+        busId: bus.id,
+        assistantId: bus.assistantId,
+        status: "CHECKED_IN",
+        latitude: student.latitude,
+        longitude: student.longitude,
+      },
+    });
+    console.log(`🧾 ${student.name} CHECKED_IN on ${bus.name}`);
+
+    if (Math.random() > 0.5) {
+      await prisma.manifest.create({
+        data: {
+          studentId: student.id,
+          busId: bus.id,
+          assistantId: bus.assistantId,
+          status: "CHECKED_OUT",
+          latitude: student.latitude + 0.001,
+          longitude: student.longitude + 0.001,
+        },
+      });
+      console.log(`📤 ${student.name} CHECKED_OUT from ${bus.name}`);
+    }
+  }
+
+  console.log("\n✅ Seeding completed successfully!");
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error("❌ Seed failed:", e);
     process.exit(1);
   })
   .finally(async () => {
     await prisma.$disconnect();
+    console.log("🔌 Disconnected from database.");
   });

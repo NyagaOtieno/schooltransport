@@ -12,6 +12,7 @@ import parentRoutes from "./routes/parentRoutes.js";
 import driverRoutes from "./routes/driverRoutes.js";
 import assistantRoutes from "./routes/assistantRoutes.js";
 import manifestRoutes from "./routes/manifestRoutes.js";
+import trackingRoutes from "./routes/trackingRoutes.js"; // ✅ Added live tracking route
 
 dotenv.config();
 
@@ -44,6 +45,7 @@ app.use("/api/parents", parentRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/assistants", assistantRoutes);
 app.use("/api/manifests", manifestRoutes);
+app.use("/api/tracking", trackingRoutes); // ✅ New tracking route
 
 // -----------------------------
 // Health check route (for Railway)
