@@ -11,7 +11,9 @@ async function main() {
   await prisma.user.deleteMany();
   await prisma.school.deleteMany();
 
+  // -----------------------------
   // Create School
+  // -----------------------------
   const school = await prisma.school.create({
     data: {
       name: "Greenwood Academy",
@@ -21,7 +23,9 @@ async function main() {
     },
   });
 
+  // -----------------------------
   // Helper function to create user with unique email/phone per school
+  // -----------------------------
   async function createUser({ name, email, phone, password, role, schoolId }) {
     const existingUser = await prisma.user.findFirst({
       where: {
@@ -49,7 +53,9 @@ async function main() {
     });
   }
 
+  // -----------------------------
   // Create Drivers
+  // -----------------------------
   const driver1 = await createUser({
     name: "John Driver",
     email: "john.driver@example.com",
@@ -66,7 +72,9 @@ async function main() {
     schoolId: school.id,
   });
 
+  // -----------------------------
   // Create Assistants
+  // -----------------------------
   const assistant1 = await createUser({
     name: "Alice Assistant",
     email: "alice.assistant@example.com",
@@ -83,7 +91,9 @@ async function main() {
     schoolId: school.id,
   });
 
+  // -----------------------------
   // Create Parents
+  // -----------------------------
   const parent1 = await createUser({
     name: "Jane Parent",
     email: "jane.parent@example.com",
@@ -102,7 +112,9 @@ async function main() {
     schoolId: school.id,
   });
 
-  // Create Bus
+  // -----------------------------
+  // Create Bus (WITHOUT assistant initially)
+  // -----------------------------
   const bus = await prisma.bus.create({
     data: {
       name: "Morning Express",
@@ -110,12 +122,13 @@ async function main() {
       capacity: 40,
       route: "Route A - City to School",
       driverId: driver1.id,
-      assistantId: assistant1.id,
       schoolId: school.id,
     },
   });
 
+  // -----------------------------
   // Create Students
+  // -----------------------------
   const student1 = await prisma.student.create({
     data: {
       name: "Emma Student",
@@ -152,45 +165,52 @@ async function main() {
     },
   });
 
-  // Create Manifests
-  await prisma.manifest.createMany({
-    data: [
-      {
-        studentId: student1.id,
-        busId: bus.id,
-        assistantId: assistant1.id,
-        status: "CHECKED_IN",
-        latitude: -1.2921,
-        longitude: 36.8219,
-      },
-      {
-        studentId: student1.id,
-        busId: bus.id,
-        assistantId: assistant1.id,
-        status: "CHECKED_OUT",
-        latitude: -1.2922,
-        longitude: 36.8220,
-      },
-      {
-        studentId: student2.id,
-        busId: bus.id,
-        assistantId: assistant1.id,
-        status: "CHECKED_IN",
-        latitude: -1.3000,
-        longitude: 36.8200,
-      },
-      {
-        studentId: student3.id,
-        busId: bus.id,
-        assistantId: assistant1.id,
-        status: "CHECKED_IN",
-        latitude: -1.3100,
-        longitude: 36.8300,
-      },
-    ],
+  // -----------------------------
+  // Simulate Admin assigning assistant to the bus
+  // -----------------------------
+  const busWithAssistant = await prisma.bus.update({
+    where: { id: bus.id },
+    data: { assistantId: assistant1.id }, // Admin-assigned assistant
   });
 
-  console.log("✅ Seeding completed successfully with school, users, bus, students, and manifests!");
+  // -----------------------------
+  // Create Manifests AFTER assistant assignment
+  // -----------------------------
+  const manifestData = [
+    { student: student1, status: "CHECKED_IN" },
+    { student: student1, status: "CHECKED_OUT" },
+    { student: student2, status: "CHECKED_IN" },
+    { student: student3, status: "CHECKED_IN" },
+  ];
+
+  for (const entry of manifestData) {
+    // Only allow CHECKED_OUT if CHECKED_IN exists for this student
+    if (entry.status === "CHECKED_OUT") {
+      const checkedIn = await prisma.manifest.findFirst({
+        where: {
+          studentId: entry.student.id,
+          busId: busWithAssistant.id,
+          status: "CHECKED_IN",
+        },
+      });
+      if (!checkedIn) continue;
+    }
+
+    await prisma.manifest.create({
+      data: {
+        studentId: entry.student.id,
+        busId: busWithAssistant.id,
+        assistantId: busWithAssistant.assistantId,
+        status: entry.status,
+        latitude: entry.student.latitude,
+        longitude: entry.student.longitude,
+      },
+    });
+  }
+
+  console.log(
+    "✅ Seeding completed successfully with school, users, bus, students, and manifests!"
+  );
 }
 
 main()
