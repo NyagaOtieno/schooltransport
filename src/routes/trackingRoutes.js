@@ -1,9 +1,5 @@
 import express from "express";
-import {
-  syncLiveLocations,
-  getLiveLocations,
-  getBusLocations,
-} from "../services/trackingSync.js";
+import * as trackingService from "../services/trackingSync.js";
 
 const router = express.Router();
 
@@ -13,7 +9,7 @@ const router = express.Router();
 // -----------------------------
 router.get("/sync", async (req, res) => {
   try {
-    const result = await syncLiveLocations();
+    const result = await trackingService.syncLiveLocations();
     res.json(result);
   } catch (err) {
     console.error("❌ Sync endpoint error:", err.message);
@@ -27,7 +23,7 @@ router.get("/sync", async (req, res) => {
 // -----------------------------
 router.get("/live-locations", async (req, res) => {
   try {
-    const locations = await getLiveLocations();
+    const locations = await trackingService.getLiveLocations();
     res.json({ success: true, count: locations.length, data: locations });
   } catch (err) {
     console.error("❌ Live locations endpoint error:", err.message);
@@ -41,7 +37,7 @@ router.get("/live-locations", async (req, res) => {
 // -----------------------------
 router.get("/bus-locations", async (req, res) => {
   try {
-    const buses = await getBusLocations();
+    const buses = await trackingService.getBusLocations();
     res.json({ success: true, count: buses.length, data: buses });
   } catch (err) {
     console.error("❌ Bus locations endpoint error:", err.message);

@@ -32,10 +32,6 @@ export const syncLiveLocations = async () => {
         }
 
         const lastUpdate = new Date(unit.last_update || now);
-        const diffSeconds = (now - lastUpdate) / 1000;
-
-        // Ignore stale data (>6 seconds old)
-        if (diffSeconds > 6) continue;
 
         const payload = {
           vehicleReg: unit.number || "Unknown",
@@ -98,7 +94,6 @@ export const getBusLocations = async () => {
       include: { driver: true, assistant: true },
     });
 
-    // Merge with latest live location if exists
     const busLocations = await Promise.all(
       buses.map(async (bus) => {
         const live = await prisma.liveLocation.findUnique({
@@ -125,4 +120,3 @@ export const getBusLocations = async () => {
     return [];
   }
 };
-export { syncLiveLocations, getLiveLocations, getBusLocations };
