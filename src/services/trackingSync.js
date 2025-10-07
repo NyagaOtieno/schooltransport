@@ -26,12 +26,14 @@ export const syncLiveLocations = async () => {
 
     for (const unit of units) {
       try {
+        // Validate coordinates
         if (typeof unit.lat !== "number" || typeof unit.lng !== "number" || !unit.lat || !unit.lng) {
           continue;
         }
 
         const lastUpdate = new Date(unit.last_update || now);
 
+        // Map tracker 'number' to local 'vehicleReg'
         const payload = {
           vehicleReg: unit.number || "Unknown",
           lat: parseFloat(unit.lat),
@@ -67,10 +69,9 @@ export const syncLiveLocations = async () => {
 // -----------------------------
 export const getLiveLocations = async () => {
   try {
-    const locations = await prisma.liveLocation.findMany({
+    return await prisma.liveLocation.findMany({
       orderBy: { lastUpdate: "desc" },
     });
-    return locations;
   } catch (err) {
     console.error("❌ Failed to fetch live locations:", err.message);
     return [];
@@ -88,20 +89,22 @@ export const getBusLocations = async () => {
 
     const busLocations = await Promise.all(
       buses.map(async (bus) => {
+        // Match bus.plateNumber with tracker 'number' stored in liveLocation.vehicleReg
         const live = await prisma.liveLocation.findUnique({
           where: { vehicleReg: bus.plateNumber },
         });
+
         return {
           busId: bus.id,
           plateNumber: bus.plateNumber,
           driverId: bus.driverId,
           assistantId: bus.assistantId,
-          lat: live?.lat || null,
-          lng: live?.lng || null,
-          direction: live?.direction || null,
-          speed: live?.speed || null,
-          movementState: live?.movementState || null,
-          lastUpdate: live?.lastUpdate || null,
+          lat: live?.lat ?? null,
+          lng: live?.lng ?? null,
+          direction: live?.direction ?? null,
+          speed: live?.speed ?? null,
+          movementState: live?.movementState ?? null,
+          lastUpdate: live?.lastUpdate ?? null,
         };
       })
     );
