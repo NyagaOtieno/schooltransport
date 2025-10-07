@@ -27,9 +27,7 @@ export const syncLiveLocations = async () => {
     for (const unit of units) {
       try {
         // Validate coordinates
-        if (typeof unit.lat !== "number" || typeof unit.lng !== "number" || !unit.lat || !unit.lng) {
-          continue;
-        }
+        if (!unit.lat || !unit.lng) continue;
 
         const lastUpdate = new Date(unit.last_update || now);
 
@@ -90,7 +88,7 @@ export const getBusLocations = async () => {
     const busLocations = await Promise.all(
       buses.map(async (bus) => {
         // Match bus.plateNumber with tracker 'number' stored in liveLocation.vehicleReg
-        const live = await prisma.liveLocation.findUnique({
+        const live = await prisma.liveLocation.findFirst({
           where: { vehicleReg: bus.plateNumber },
         });
 
