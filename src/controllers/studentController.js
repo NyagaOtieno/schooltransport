@@ -90,44 +90,37 @@ export const createStudent = async (req, res) => {
       });
 
       if (!parent) {
-        // Create parent (name not stored in parent, it is on user)
         parent = await prisma.parent.create({ data: {} });
       }
 
       // Link student -> parent
       await prisma.student.update({ where: { id: student.id }, data: { parentId: parent.id } });
 
-      // Handle User linkage safely
+      // Handle user linkage
       if (parent.user) {
-        userParent = parent.user;
-        // Update existing user details if needed
-        await prisma.user.update({
-          where: { id: userParent.id },
+        userParent = await prisma.user.update({
+          where: { id: parent.user.id },
           data: {
-            name: parentName || userParent.name,
-            phone: parentPhone || userParent.phone,
-            email: parentEmail || userParent.email,
+            name: parentName || parent.user.name,
+            phone: parentPhone || parent.user.phone,
+            email: parentEmail || parent.user.email,
           },
         });
       } else {
-        // Try to find user by compound unique keys
-        const possibleKeys = [];
-        if (parentEmail) possibleKeys.push({ email_schoolId: { email: parentEmail, schoolId } });
-        if (parentPhone) possibleKeys.push({ phone_schoolId: { phone: parentPhone, schoolId } });
-
-        for (const key of possibleKeys) {
-          if (key) {
-            userParent = await prisma.user.findUnique({ where: key }).catch(() => null);
-            if (userParent) break;
-          }
+        // Try find by compound unique keys
+        if (parentEmail) {
+          userParent = await prisma.user.findUnique({ where: { email_schoolId: { email: parentEmail, schoolId } } }).catch(() => null);
+        }
+        if (!userParent && parentPhone) {
+          userParent = await prisma.user.findUnique({ where: { phone_schoolId: { phone: parentPhone, schoolId } } }).catch(() => null);
         }
 
         if (!userParent) {
           userParent = await prisma.user.create({
             data: {
               name: parentName || "Parent",
-              phone: parentPhone,
-              email: parentEmail,
+              phone: parentPhone || null,
+              email: parentEmail || null,
               password: await bcrypt.hash("changeme", 10),
               schoolId,
               role: "PARENT",
@@ -135,7 +128,6 @@ export const createStudent = async (req, res) => {
           });
         }
 
-        // Link User -> Parent
         await prisma.parent.update({ where: { id: parent.id }, data: { userId: userParent.id } });
       }
     }
@@ -164,10 +156,8 @@ export const updateStudent = async (req, res) => {
 
     if (!student) return res.status(404).json({ status: "error", message: "Student not found" });
 
-    // Update student data
     const updatedStudent = await prisma.student.update({ where: { id }, data: studentData });
 
-    // Handle parent + user updates
     if (parentPhone || parentEmail) {
       let parent = student.parent;
       let userParent = parent?.user;
@@ -178,7 +168,7 @@ export const updateStudent = async (req, res) => {
       }
 
       if (userParent) {
-        await prisma.user.update({
+        userParent = await prisma.user.update({
           where: { id: userParent.id },
           data: {
             name: parentName || userParent.name,
@@ -187,23 +177,18 @@ export const updateStudent = async (req, res) => {
           },
         });
       } else {
-        const possibleKeys = [];
-        if (parentEmail) possibleKeys.push({ email_schoolId: { email: parentEmail, schoolId: student.schoolId } });
-        if (parentPhone) possibleKeys.push({ phone_schoolId: { phone: parentPhone, schoolId: student.schoolId } });
-
-        for (const key of possibleKeys) {
-          if (key) {
-            userParent = await prisma.user.findUnique({ where: key }).catch(() => null);
-            if (userParent) break;
-          }
+        if (parentEmail) {
+          userParent = await prisma.user.findUnique({ where: { email_schoolId: { email: parentEmail, schoolId: student.schoolId } } }).catch(() => null);
         }
-
+        if (!userParent && parentPhone) {
+          userParent = await prisma.user.findUnique({ where: { phone_schoolId: { phone: parentPhone, schoolId: student.schoolId } } }).catch(() => null);
+        }
         if (!userParent) {
           userParent = await prisma.user.create({
             data: {
               name: parentName || "Parent",
-              phone: parentPhone,
-              email: parentEmail,
+              phone: parentPhone || null,
+              email: parentEmail || null,
               password: await bcrypt.hash("changeme", 10),
               schoolId: student.schoolId,
               role: "PARENT",
@@ -239,10 +224,8 @@ export const deleteStudent = async (req, res) => {
     const parent = student.parent;
     const userParent = parent?.user;
 
-    // Delete student
     await prisma.student.delete({ where: { id } });
 
-    // Cleanup parent + user if no other students remain
     if (parent) {
       const remaining = await prisma.student.count({ where: { parentId: parent.id } });
       if (remaining === 0) {

@@ -42,18 +42,25 @@ async function main() {
   // -----------------------------
   // Helper: Create user safely
   // -----------------------------
-  async function createUser({ name, email, phone, password, role = Role.PARENT, schoolId }) {
+  async function createUser({ name, email, phone, password, role = Role.PARENT, schoolId = null }) {
     let existingUser = null;
 
-    if (email) {
-      existingUser = await prisma.user.findUnique({
-        where: { email_schoolId: { email, schoolId } },
-      });
-    }
-    if (!existingUser && phone) {
-      existingUser = await prisma.user.findUnique({
-        where: { phone_schoolId: { phone, schoolId } },
-      });
+    // Check uniqueness only within the school if schoolId is provided
+    if (schoolId) {
+      if (email) {
+        existingUser = await prisma.user.findUnique({
+          where: { email_schoolId: { email, schoolId } },
+        });
+      }
+      if (!existingUser && phone) {
+        existingUser = await prisma.user.findUnique({
+          where: { phone_schoolId: { phone, schoolId } },
+        });
+      }
+    } else {
+      // No schoolId: check global uniqueness
+      if (email) existingUser = await prisma.user.findUnique({ where: { email } });
+      if (!existingUser && phone) existingUser = await prisma.user.findUnique({ where: { phone } });
     }
 
     if (existingUser) return existingUser;
@@ -124,7 +131,7 @@ async function main() {
     const parentEmail = `${parentNames[i].split(" ")[0].toLowerCase()}.parent@example.com`;
     const parentPhone = `070000000${i + 1}`;
 
-    // Create parent user
+    // Create parent user first
     const parentUser = await createUser({
       name: parentNames[i],
       email: parentEmail,
@@ -134,9 +141,15 @@ async function main() {
       schoolId: school.id,
     });
 
-    // Create parent record linking to user
+    if (!parentUser || !parentUser.id) {
+      throw new Error(`Failed to create parent user for ${parentNames[i]}`);
+    }
+
+    // Create Parent record linking to user
     const parent = await prisma.parent.create({
-      data: { userId: parentUser.id },
+      data: {
+        userId: parentUser.id,
+      },
     });
 
     // Random notifications
