@@ -5,13 +5,12 @@ import bcrypt from 'bcryptjs';
 const { PrismaClient } = pkg;
 const prisma = new PrismaClient();
 
-// ✅ Define Role manually
+// ✅ Define roles
 const Role = {
   ADMIN: 'ADMIN',
   DRIVER: 'DRIVER',
   ASSISTANT: 'ASSISTANT',
   PARENT: 'PARENT',
-  STUDENT: 'STUDENT', // optional if you want students to have login
 };
 
 async function main() {
@@ -41,7 +40,7 @@ async function main() {
   console.log(`✅ School created: ${school.name}\n`);
 
   // -----------------------------
-  // Helper: Create user safely using compound unique keys
+  // Helper: Create user safely
   // -----------------------------
   async function createUser({ name, email, phone, password, role = Role.PARENT, schoolId }) {
     let existingUser = null;
@@ -135,7 +134,7 @@ async function main() {
       schoolId: school.id,
     });
 
-    // Create parent record
+    // Create parent record linking to user
     const parent = await prisma.parent.create({
       data: { userId: parentUser.id },
     });
