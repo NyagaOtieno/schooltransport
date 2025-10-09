@@ -52,10 +52,10 @@ router.get("/:id", async (req, res) => {
 // -----------------------------
 router.post("/", async (req, res) => {
   try {
-    const { name, grade, latitude, longitude, busId, parentId, schoolId } = req.body;
+    const { name, grade, latitude, longitude, busId, schoolId, parentName, parentPhone, parentEmail } = req.body;
 
-    if (!busId || !parentId || !schoolId) {
-      return res.status(400).json({ status: "error", message: "busId, parentId, and schoolId are required" });
+    if (!busId || !schoolId || (!parentName && !parentPhone && !parentEmail)) {
+      return res.status(400).json({ status: "error", message: "busId, schoolId, and parent information are required" });
     }
 
     // Validate school
@@ -67,17 +67,40 @@ router.post("/", async (req, res) => {
     if (!bus) return res.status(400).json({ status: "error", message: "Invalid busId" });
     if (bus.schoolId !== schoolId) return res.status(400).json({ status: "error", message: "Bus does not belong to this school" });
 
-    // Validate parent
-    const parent = await prisma.parent.findUnique({ where: { id: parentId }, include: { user: true } });
-    if (!parent) return res.status(400).json({ status: "error", message: "Invalid parentId" });
-    if (parent.user.schoolId !== schoolId) return res.status(400).json({ status: "error", message: "Parent does not belong to this school" });
+    // Check if parent exists
+    let parent;
+    if (parentPhone || parentEmail) {
+      parent = await prisma.parent.findFirst({
+        where: {
+          OR: [
+            parentPhone ? { user: { phone: parentPhone } } : undefined,
+            parentEmail ? { user: { email: parentEmail } } : undefined
+          ].filter(Boolean)
+        },
+        include: { user: true }
+      });
+    }
 
+    // If parent doesn't exist, create user + parent
+    if (!parent) {
+      const user = await prisma.user.create({
+        data: { name: parentName, phone: parentPhone, email: parentEmail, schoolId }
+      });
+
+      parent = await prisma.parent.create({
+        data: { userId: user.id, schoolId },
+        include: { user: true }
+      });
+    }
+
+    // Create student
     const student = await prisma.student.create({
-      data: { name, grade, latitude, longitude, busId, parentId, schoolId },
-      include: { school: true, bus: true, parent: { include: { user: true } } },
+      data: { name, grade, latitude, longitude, busId, schoolId, parentId: parent.id },
+      include: { school: true, bus: true, parent: { include: { user: true } } }
     });
 
     res.json({ status: "success", student });
+
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: "error", message: "Server error", detail: error.message });
@@ -118,10 +141,11 @@ router.put("/:id", async (req, res) => {
     const updatedStudent = await prisma.student.update({
       where: { id: studentId },
       data: req.body,
-      include: { school: true, bus: true, parent: { include: { user: true } } },
+      include: { school: true, bus: true, parent: { include: { user: true } } }
     });
 
     res.json({ status: "success", student: updatedStudent });
+
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: "error", message: "Server error", detail: error.message });
