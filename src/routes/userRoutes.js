@@ -1,5 +1,6 @@
 import express from "express";
 import prisma from "../middleware/prisma.js";
+import bcrypt from "bcryptjs";
 
 const router = express.Router();
 
@@ -21,7 +22,10 @@ router.get("/", async (req, res) => {
 // -----------------------------
 router.get("/:id", async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: Number(req.params.id) } });
+    const userId = Number(req.params.id);
+    if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
+
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { school: true } });
     if (!user) return res.status(404).json({ error: "User not found" });
     res.json(user);
   } catch (error) {
@@ -35,18 +39,21 @@ router.get("/:id", async (req, res) => {
 // -----------------------------
 router.post("/", async (req, res) => {
   try {
-    const { email, phone, schoolId } = req.body;
+    const { name, email, phone, schoolId, role, password } = req.body;
 
-    if (!email || !phone || !schoolId) {
-      return res.status(400).json({ error: "Email, phone, and schoolId are required" });
+    if (!schoolId || (!email && !phone)) {
+      return res.status(400).json({ error: "Email or phone and schoolId are required" });
     }
 
-    // Check if email or phone exists in same school
+    // Check for existing user in same school
     const existingUser = await prisma.user.findFirst({
       where: {
         schoolId,
-        OR: [{ email }, { phone }]
-      }
+        OR: [
+          email ? { email } : undefined,
+          phone ? { phone } : undefined
+        ].filter(Boolean),
+      },
     });
 
     if (existingUser) {
@@ -55,7 +62,13 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const newUser = await prisma.user.create({ data: req.body });
+    // Hash password if provided
+    const hashedPassword = password ? await bcrypt.hash(password, 10) : await bcrypt.hash("changeme", 10);
+
+    const newUser = await prisma.user.create({
+      data: { name, email, phone, schoolId, role: role || "USER", password: hashedPassword },
+    });
+
     res.status(201).json(newUser);
   } catch (error) {
     console.error(error);
@@ -69,28 +82,37 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   try {
     const userId = Number(req.params.id);
-    const { email, phone, schoolId } = req.body;
+    if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
 
-    // Check if email or phone conflicts with other users in the same school
+    const { email, phone, schoolId, password, name, role } = req.body;
+
+    // Check for conflicts in same school
     if ((email || phone) && schoolId) {
-      const conflictingUser = await prisma.user.findFirst({
+      const conflictUser = await prisma.user.findFirst({
         where: {
           schoolId,
-          OR: [{ email }, { phone }],
-          NOT: { id: userId }
-        }
+          OR: [
+            email ? { email } : undefined,
+            phone ? { phone } : undefined
+          ].filter(Boolean),
+          NOT: { id: userId },
+        },
       });
-
-      if (conflictingUser) {
-        return res.status(409).json({
-          error: "Email or phone already exists for another user in this school."
-        });
+      if (conflictUser) {
+        return res.status(409).json({ error: "Email or phone already exists for another user in this school." });
       }
     }
 
     const updatedUser = await prisma.user.update({
       where: { id: userId },
-      data: req.body
+      data: {
+        name,
+        email,
+        phone,
+        schoolId,
+        role,
+        password: password ? await bcrypt.hash(password, 10) : undefined
+      },
     });
 
     res.json(updatedUser);
@@ -105,7 +127,16 @@ router.put("/:id", async (req, res) => {
 // -----------------------------
 router.delete("/:id", async (req, res) => {
   try {
-    const deletedUser = await prisma.user.delete({ where: { id: Number(req.params.id) } });
+    const userId = Number(req.params.id);
+    if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
+
+    // Remove parent linkage if exists
+    const parent = await prisma.parent.findFirst({ where: { userId } });
+    if (parent) {
+      await prisma.parent.update({ where: { id: parent.id }, data: { userId: null } });
+    }
+
+    const deletedUser = await prisma.user.delete({ where: { id: userId } });
     res.json(deletedUser);
   } catch (error) {
     console.error(error);
