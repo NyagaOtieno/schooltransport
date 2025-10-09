@@ -4,18 +4,26 @@ import bcrypt from "bcryptjs";
 
 const router = express.Router();
 
+// Helper to validate IDs
+const parseId = (id) => {
+  const parsed = Number(id);
+  if (isNaN(parsed)) throw new Error("Invalid ID");
+  return parsed;
+};
+
 // -----------------------------
 // GET all parents
 // -----------------------------
 router.get("/", async (req, res) => {
   try {
     const parents = await prisma.parent.findMany({
-      include: { 
-        user: true, 
-        students: { include: { bus: true, school: true } } 
+      include: {
+        user: true,
+        students: { include: { bus: true, school: true } },
       },
+      orderBy: { id: "desc" },
     });
-    res.json(parents);
+    res.json({ status: "success", count: parents.length, data: parents });
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: "error", message: "Server error", detail: error.message });
@@ -23,26 +31,19 @@ router.get("/", async (req, res) => {
 });
 
 // -----------------------------
-// GET a parent by ID
+// GET parent by ID
 // -----------------------------
 router.get("/:id", async (req, res) => {
   try {
-    const parentId = Number(req.params.id);
-    if (isNaN(parentId)) {
-      return res.status(400).json({ status: "error", message: "Invalid parent ID" });
-    }
+    const parentId = parseId(req.params.id);
 
     const parent = await prisma.parent.findUnique({
       where: { id: parentId },
-      include: { 
-        user: true, 
-        students: { include: { bus: true, school: true } } 
-      },
+      include: { user: true, students: { include: { bus: true, school: true } } },
     });
 
     if (!parent) return res.status(404).json({ status: "error", message: "Parent not found" });
-
-    res.json(parent);
+    res.json({ status: "success", data: parent });
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: "error", message: "Server error", detail: error.message });
@@ -56,33 +57,36 @@ router.post("/", async (req, res) => {
   try {
     const { name, email, phone, password, schoolId } = req.body;
 
-    if (!name || !email || !phone || !password || !schoolId) {
-      return res.status(400).json({ status: "error", message: "name, email, phone, password, and schoolId are required" });
+    if (!name || !phone || !schoolId) {
+      return res.status(400).json({ status: "error", message: "name, phone, and schoolId are required" });
     }
 
     // Validate school
     const school = await prisma.school.findUnique({ where: { id: schoolId } });
     if (!school) return res.status(400).json({ status: "error", message: "Invalid schoolId" });
 
-    // Check if email or phone already exists in the same school
+    // Check for existing user within same school
     const existingUser = await prisma.user.findFirst({
       where: {
         schoolId,
-        OR: [{ email }, { phone }],
+        OR: [
+          email ? { email } : undefined,
+          phone ? { phone } : undefined,
+        ].filter(Boolean),
       },
     });
 
     if (existingUser) {
-      return res.status(400).json({ status: "error", message: "Email or phone already exists for this school" });
+      return res.status(400).json({ status: "error", message: "Email or phone already exists in this school" });
     }
 
-    // Create user first
+    // Create user
     const user = await prisma.user.create({
       data: {
         name,
         email,
         phone,
-        password: await bcrypt.hash(password, 10),
+        password: password ? await bcrypt.hash(password, 10) : await bcrypt.hash("changeme", 10),
         role: "PARENT",
         schoolId,
       },
@@ -94,7 +98,7 @@ router.post("/", async (req, res) => {
       include: { user: true },
     });
 
-    res.json(parent);
+    res.json({ status: "success", parent });
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: "error", message: "Server error", detail: error.message });
@@ -106,18 +110,14 @@ router.post("/", async (req, res) => {
 // -----------------------------
 router.put("/:id", async (req, res) => {
   try {
-    const parentId = Number(req.params.id);
-    if (isNaN(parentId)) {
-      return res.status(400).json({ status: "error", message: "Invalid parent ID" });
-    }
-
-    // Check if parent exists
-    const existingParent = await prisma.parent.findUnique({ where: { id: parentId }, include: { user: true } });
-    if (!existingParent) {
-      return res.status(404).json({ status: "error", message: "Parent not found" });
-    }
-
+    const parentId = parseId(req.params.id);
     const { name, email, phone, password, schoolId } = req.body;
+
+    const parent = await prisma.parent.findUnique({
+      where: { id: parentId },
+      include: { user: true },
+    });
+    if (!parent) return res.status(404).json({ status: "error", message: "Parent not found" });
 
     // Validate school if provided
     if (schoolId) {
@@ -125,26 +125,24 @@ router.put("/:id", async (req, res) => {
       if (!school) return res.status(400).json({ status: "error", message: "Invalid schoolId" });
     }
 
-    // Check email/phone uniqueness within the same school
+    // Check uniqueness for email/phone within the school
     if (email || phone) {
       const conflictUser = await prisma.user.findFirst({
         where: {
-          schoolId: schoolId || existingParent.user.schoolId,
+          schoolId: schoolId || parent.user.schoolId,
           OR: [
             email ? { email } : undefined,
             phone ? { phone } : undefined,
           ].filter(Boolean),
-          NOT: { id: existingParent.user.id },
+          NOT: { id: parent.user.id },
         },
       });
-      if (conflictUser) {
-        return res.status(400).json({ status: "error", message: "Email or phone already exists in this school" });
-      }
+      if (conflictUser) return res.status(400).json({ status: "error", message: "Email or phone already exists in this school" });
     }
 
     // Update user record
     const updatedUser = await prisma.user.update({
-      where: { id: existingParent.user.id },
+      where: { id: parent.user.id },
       data: {
         name,
         email,
@@ -154,7 +152,7 @@ router.put("/:id", async (req, res) => {
       },
     });
 
-    res.json({ ...existingParent, user: updatedUser });
+    res.json({ status: "success", message: "Parent updated", parent: { ...parent, user: updatedUser } });
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: "error", message: "Server error", detail: error.message });
@@ -166,16 +164,16 @@ router.put("/:id", async (req, res) => {
 // -----------------------------
 router.delete("/:id", async (req, res) => {
   try {
-    const parentId = Number(req.params.id);
-    if (isNaN(parentId)) return res.status(400).json({ status: "error", message: "Invalid parent ID" });
+    const parentId = parseId(req.params.id);
 
-    const parent = await prisma.parent.findUnique({ where: { id: parentId }, include: { user: true } });
+    const parent = await prisma.parent.findUnique({
+      where: { id: parentId },
+      include: { user: true },
+    });
     if (!parent) return res.status(404).json({ status: "error", message: "Parent not found" });
 
-    // Delete the parent user first (cascades if foreign keys set)
+    // Delete user first to avoid foreign key errors
     await prisma.user.delete({ where: { id: parent.user.id } });
-
-    // Delete parent record
     await prisma.parent.delete({ where: { id: parentId } });
 
     res.json({ status: "success", message: "Parent deleted" });
