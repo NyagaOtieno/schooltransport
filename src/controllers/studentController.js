@@ -90,8 +90,8 @@ export const createStudent = async (req, res) => {
       });
 
       if (!parent) {
-        // Create parent
-        parent = await prisma.parent.create({ data: { name: parentName || "Parent" } });
+        // Create parent (name not stored in parent, it is on user)
+        parent = await prisma.parent.create({ data: {} });
       }
 
       // Link student -> parent
@@ -116,14 +116,16 @@ export const createStudent = async (req, res) => {
         if (parentPhone) possibleKeys.push({ phone_schoolId: { phone: parentPhone, schoolId } });
 
         for (const key of possibleKeys) {
-          userParent = await prisma.user.findUnique({ where: key }).catch(() => null);
-          if (userParent) break;
+          if (key) {
+            userParent = await prisma.user.findUnique({ where: key }).catch(() => null);
+            if (userParent) break;
+          }
         }
 
         if (!userParent) {
           userParent = await prisma.user.create({
             data: {
-              name: parentName || parent.name,
+              name: parentName || "Parent",
               phone: parentPhone,
               email: parentEmail,
               password: await bcrypt.hash("changeme", 10),
@@ -171,10 +173,8 @@ export const updateStudent = async (req, res) => {
       let userParent = parent?.user;
 
       if (!parent) {
-        parent = await prisma.parent.create({ data: { name: parentName || "Parent" } });
+        parent = await prisma.parent.create({ data: {} });
         await prisma.student.update({ where: { id }, data: { parentId: parent.id } });
-      } else {
-        parent = await prisma.parent.update({ where: { id: parent.id }, data: { name: parentName || parent.name } });
       }
 
       if (userParent) {
@@ -187,20 +187,21 @@ export const updateStudent = async (req, res) => {
           },
         });
       } else {
-        // Safe findUnique by compound keys
         const possibleKeys = [];
         if (parentEmail) possibleKeys.push({ email_schoolId: { email: parentEmail, schoolId: student.schoolId } });
         if (parentPhone) possibleKeys.push({ phone_schoolId: { phone: parentPhone, schoolId: student.schoolId } });
 
         for (const key of possibleKeys) {
-          userParent = await prisma.user.findUnique({ where: key }).catch(() => null);
-          if (userParent) break;
+          if (key) {
+            userParent = await prisma.user.findUnique({ where: key }).catch(() => null);
+            if (userParent) break;
+          }
         }
 
         if (!userParent) {
           userParent = await prisma.user.create({
             data: {
-              name: parentName || parent.name,
+              name: parentName || "Parent",
               phone: parentPhone,
               email: parentEmail,
               password: await bcrypt.hash("changeme", 10),
