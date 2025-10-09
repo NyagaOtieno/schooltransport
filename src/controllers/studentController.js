@@ -1,5 +1,4 @@
 import prisma from "../middleware/prisma.js";
-import bcrypt from "bcryptjs";
 
 // 🧩 Utility function for clean error handling
 const handleError = (res, error, message = "Server error") => {
@@ -28,34 +27,27 @@ export const getStudents = async (req, res) => {
 export const getStudent = async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ status: "error", message: "Invalid student ID" });
+    if (isNaN(id))
+      return res.status(400).json({ status: "error", message: "Invalid student ID" });
 
     const student = await prisma.student.findUnique({
       where: { id },
       include: { school: true, bus: true, parent: true },
     });
 
-    if (!student) return res.status(404).json({ status: "error", message: "Student not found" });
+    if (!student)
+      return res.status(404).json({ status: "error", message: "Student not found" });
+
     res.json({ status: "success", data: student });
   } catch (error) {
     handleError(res, error, "Failed to fetch student");
   }
 };
 
-// 🧩 Create student with parent/user linkage
+// 🧩 Create student and link parent/user safely
 export const createStudent = async (req, res) => {
   try {
-    const {
-      name,
-      grade,
-      latitude,
-      longitude,
-      busId,
-      schoolId,
-      parentName,
-      parentPhone,
-      parentEmail,
-    } = req.body;
+    const { name, grade, latitude, longitude, busId, schoolId, parentName, parentPhone } = req.body;
 
     if (!name || !grade || !schoolId) {
       return res.status(400).json({
@@ -64,6 +56,7 @@ export const createStudent = async (req, res) => {
       });
     }
 
+    // Step 1: Create student (without parentId)
     const student = await prisma.student.create({
       data: { name, grade, latitude, longitude, busId, schoolId },
     });
@@ -71,56 +64,46 @@ export const createStudent = async (req, res) => {
     let parent = null;
     let userParent = null;
 
-    if (parentPhone || parentEmail) {
-      parent = await prisma.parent.findFirst({
-        where: {
-          OR: [{ phone: parentPhone || "" }, { user: { email: parentEmail || "" } }],
-        },
-        include: { user: true },
-      });
+    // Step 2: Handle parent if phone is provided
+    if (parentPhone) {
+      // Try to find existing parent by phone
+      parent = await prisma.parent.findFirst({ where: { user: { phone: parentPhone } } });
 
+      // Create parent if not exists
       if (!parent) {
         parent = await prisma.parent.create({
-          data: { name: parentName || "Parent", phone: parentPhone || null },
+          data: { name: parentName || "Parent" },
         });
       }
 
+      // Step 3: Connect student to parent
       await prisma.student.update({
         where: { id: student.id },
         data: { parentId: parent.id },
       });
 
-      userParent = parent.user;
+      // Step 4: Handle User linkage
+      userParent = await prisma.user.findFirst({
+        where: { phone: parentPhone, role: "PARENT" },
+      });
+
       if (!userParent) {
-        const passwordHash = await bcrypt.hash("changeme", 10);
         userParent = await prisma.user.create({
           data: {
             name: parentName || parent.name,
-            email: parentEmail || null,
-            phone: parentPhone || null,
-            password: passwordHash,
-            role: "PARENT",
+            phone: parentPhone,
+            password: "changeme", // default password
             schoolId,
+            role: "PARENT",
           },
         });
 
+        // Link User to Parent
         await prisma.parent.update({
           where: { id: parent.id },
           data: { userId: userParent.id },
         });
       }
-
-      await prisma.notification.createMany({
-        data: [
-          {
-            parentId: parent.id,
-            title: "Welcome",
-            message: `Hello ${parent.name}, your child ${student.name} has been added.`,
-            type: "INFO",
-          },
-        ],
-        skipDuplicates: true,
-      });
     }
 
     res.status(201).json({
@@ -135,62 +118,77 @@ export const createStudent = async (req, res) => {
   }
 };
 
-// 🧩 Update student with parent/user linkage
+// 🧩 Update student and handle parent info/User linkage
 export const updateStudent = async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ status: "error", message: "Invalid student ID" });
+    if (isNaN(id))
+      return res.status(400).json({ status: "error", message: "Invalid student ID" });
 
-    const { name, grade, latitude, longitude, busId, schoolId, parentName, parentPhone, parentEmail } = req.body;
+    const { parentName, parentPhone, ...studentData } = req.body;
 
-    // Step 1: Update basic student info
-    const student = await prisma.student.update({
+    // Step 1: Fetch student with parent/user
+    const student = await prisma.student.findUnique({
       where: { id },
-      data: { name, grade, latitude, longitude, busId, schoolId },
       include: { parent: { include: { user: true } } },
     });
 
-    let parent = student.parent;
-    let userParent = parent?.user;
+    if (!student)
+      return res.status(404).json({ status: "error", message: "Student not found" });
 
-    // Step 2: Handle parent info if provided
-    if (parentPhone || parentEmail || parentName) {
+    // Step 2: Update student info
+    const updatedStudent = await prisma.student.update({
+      where: { id },
+      data: studentData,
+    });
+
+    // Step 3: Handle parent update
+    if (parentPhone) {
+      let parent = student.parent;
+      let userParent = parent?.user;
+
+      // Update existing parent or create new
       if (!parent) {
-        // Create new parent if none exists
         parent = await prisma.parent.create({
-          data: { name: parentName || "Parent", phone: parentPhone || null },
+          data: { name: parentName || "Parent" },
         });
-        await prisma.student.update({ where: { id }, data: { parentId: parent.id } });
       } else {
-        // Update existing parent
-        await prisma.parent.update({
+        parent = await prisma.parent.update({
           where: { id: parent.id },
-          data: { name: parentName || parent.name, phone: parentPhone || parent.phone },
+          data: { name: parentName || parent.name },
         });
       }
 
-      // Step 3: Ensure User account exists and is linked
+      // Link student to parent if not already linked
+      if (updatedStudent.parentId !== parent.id) {
+        await prisma.student.update({
+          where: { id },
+          data: { parentId: parent.id },
+        });
+      }
+
+      // Update or create User
       if (!userParent) {
-        const passwordHash = await bcrypt.hash("changeme", 10);
         userParent = await prisma.user.create({
           data: {
             name: parentName || parent.name,
-            email: parentEmail || null,
-            phone: parentPhone || null,
-            password: passwordHash,
+            phone: parentPhone,
+            password: "changeme",
+            schoolId: student.schoolId,
             role: "PARENT",
-            schoolId,
           },
         });
 
-        await prisma.parent.update({ where: { id: parent.id }, data: { userId: userParent.id } });
+        await prisma.parent.update({
+          where: { id: parent.id },
+          data: { userId: userParent.id },
+        });
       } else {
-        await prisma.user.update({
+        userParent = await prisma.user.update({
           where: { id: userParent.id },
           data: {
-            name: parentName || userParent.name,
-            email: parentEmail || userParent.email,
-            phone: parentPhone || userParent.phone,
+            name: parentName || parent.name,
+            phone: parentPhone,
           },
         });
       }
@@ -199,24 +197,52 @@ export const updateStudent = async (req, res) => {
     res.json({
       status: "success",
       message: "Student updated successfully",
-      student,
-      parent,
-      userParent,
+      student: updatedStudent,
     });
   } catch (error) {
     handleError(res, error, "Failed to update student");
   }
 };
 
-// 🧩 Delete student
+// 🧩 Delete student, optionally clean up parent/user
 export const deleteStudent = async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ status: "error", message: "Invalid student ID" });
+    if (isNaN(id))
+      return res.status(400).json({ status: "error", message: "Invalid student ID" });
 
+    // Fetch student with parent and user
+    const student = await prisma.student.findUnique({
+      where: { id },
+      include: { parent: { include: { user: true } } },
+    });
+
+    if (!student)
+      return res.status(404).json({ status: "error", message: "Student not found" });
+
+    const parent = student.parent;
+    const userParent = parent?.user;
+
+    // Delete student
     await prisma.student.delete({ where: { id } });
 
-    res.json({ status: "success", message: "Student deleted successfully" });
+    // Clean up parent and user if no other students remain
+    if (parent) {
+      const remainingStudents = await prisma.student.count({
+        where: { parentId: parent.id },
+      });
+
+      if (remainingStudents === 0) {
+        if (userParent) await prisma.user.delete({ where: { id: userParent.id } });
+        await prisma.parent.delete({ where: { id: parent.id } });
+      }
+    }
+
+    res.json({
+      status: "success",
+      message: "Student deleted successfully",
+      studentId: id,
+    });
   } catch (error) {
     handleError(res, error, "Failed to delete student");
   }
