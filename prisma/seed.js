@@ -1,4 +1,4 @@
-// ✅ ESM-compatible Prisma import (CommonJS-safe)
+// ✅ ESM-compatible Prisma import
 import pkg from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
@@ -11,6 +11,7 @@ const Role = {
   DRIVER: 'DRIVER',
   ASSISTANT: 'ASSISTANT',
   PARENT: 'PARENT',
+  STUDENT: 'STUDENT', // optional if you want students to have login
 };
 
 async function main() {
@@ -40,12 +41,21 @@ async function main() {
   console.log(`✅ School created: ${school.name}\n`);
 
   // -----------------------------
-  // Helper: Create user safely
+  // Helper: Create user safely using compound unique keys
   // -----------------------------
   async function createUser({ name, email, phone, password, role = Role.PARENT, schoolId }) {
-    const existingUser = await prisma.user.findFirst({
-      where: { schoolId, OR: [{ email }, { phone }] },
-    });
+    let existingUser = null;
+
+    if (email) {
+      existingUser = await prisma.user.findUnique({
+        where: { email_schoolId: { email, schoolId } },
+      });
+    }
+    if (!existingUser && phone) {
+      existingUser = await prisma.user.findUnique({
+        where: { phone_schoolId: { phone, schoolId } },
+      });
+    }
 
     if (existingUser) return existingUser;
 
@@ -55,7 +65,7 @@ async function main() {
         email,
         phone,
         password: await bcrypt.hash(password, 10),
-        role, // defaults to PARENT
+        role,
         schoolId,
       },
     });
@@ -64,7 +74,7 @@ async function main() {
   // -----------------------------
   // Create Admin
   // -----------------------------
-  console.log("\n🧑‍💼 Creating admin user...");
+  console.log("🧑‍💼 Creating admin user...");
   await createUser({
     name: "System Admin",
     email: "admin@schooltrack.com",
@@ -77,7 +87,7 @@ async function main() {
   // -----------------------------
   // Create Drivers and Assistants
   // -----------------------------
-  console.log("\n🚌 Creating drivers and assistants...");
+  console.log("🚌 Creating drivers and assistants...");
   const driverNames = ["John Driver", "Mike Driver", "David Driver", "Chris Driver"];
   const assistantNames = ["Alice Assistant", "Bob Assistant", "Carol Assistant", "Diana Assistant"];
 
@@ -107,24 +117,30 @@ async function main() {
   // -----------------------------
   // Create Parents + Notifications
   // -----------------------------
-  console.log("\n👨‍👩‍👧 Creating parents and notifications...");
+  console.log("👨‍👩‍👧 Creating parents and notifications...");
   const parentNames = ["Jane Parent", "Paul Parent", "Mary Parent", "Peter Parent"];
   const dbParents = [];
 
   for (let i = 0; i < parentNames.length; i++) {
+    const parentEmail = `${parentNames[i].split(" ")[0].toLowerCase()}.parent@example.com`;
+    const parentPhone = `070000000${i + 1}`;
+
+    // Create parent user
     const parentUser = await createUser({
       name: parentNames[i],
-      email: `${parentNames[i].split(" ")[0].toLowerCase()}.parent@example.com`,
-      phone: `070000000${i + 1}`,
+      email: parentEmail,
+      phone: parentPhone,
       password: "parent123",
+      role: Role.PARENT,
       schoolId: school.id,
     });
 
+    // Create parent record
     const parent = await prisma.parent.create({
       data: { userId: parentUser.id },
     });
 
-    // Add 1-2 random notifications per parent
+    // Random notifications
     for (let n = 0; n < Math.floor(Math.random() * 2) + 1; n++) {
       await prisma.notification.create({
         data: {
@@ -143,7 +159,7 @@ async function main() {
   // -----------------------------
   // Create Buses
   // -----------------------------
-  console.log("\n🚌 Creating buses...");
+  console.log("🚌 Creating buses...");
   const busData = [
     { name: "Morning Express", plate: "KAA123X", route: "Route A - City to School" },
     { name: "Sunrise Shuttle", plate: "KBB456Y", route: "Route B - Westlands to School" },
@@ -167,9 +183,9 @@ async function main() {
   }
 
   // -----------------------------
-  // Create Students + User accounts + random bus assignment
+  // Create Students and link to parent
   // -----------------------------
-  console.log("\n🎒 Creating students...");
+  console.log("🎒 Creating students...");
   const studentNames = [
     "Emma Student","Liam Student","Sophia Student","Noah Student",
     "Olivia Student","Mason Student","Isabella Student","Ethan Student",
@@ -184,15 +200,6 @@ async function main() {
     for (let i = 0; i < siblings; i++) {
       const studentName = studentNames[nameIndex % studentNames.length];
 
-      // Create User account (role = PARENT)
-      const studentUser = await createUser({
-        name: studentName,
-        email: `${studentName.split(" ")[0].toLowerCase()}.student@example.com`,
-        phone: `07330000${nameIndex + 1}`,
-        password: "student123",
-        schoolId: school.id, // PARENT role
-      });
-
       // Assign random bus
       const assignedBus = buses[Math.floor(Math.random() * buses.length)];
 
@@ -205,7 +212,6 @@ async function main() {
           busId: assignedBus.id,
           parentId: parent.id,
           schoolId: school.id,
-          userId: studentUser.id,
         },
       });
 
@@ -216,14 +222,13 @@ async function main() {
   }
 
   // -----------------------------
-  // Create random manifests for students
+  // Create random manifests
   // -----------------------------
-  console.log("\n📋 Creating manifests...");
+  console.log("📋 Creating manifests...");
   for (const student of allStudents) {
     const bus = buses.find(b => b.id === student.busId);
     if (!bus) continue;
 
-    // Randomly CHECKED_IN and optionally CHECKED_OUT
     await prisma.manifest.create({
       data: {
         studentId: student.id,
