@@ -30,6 +30,20 @@ async function main() {
   console.log(`✅ School created: ${school.name}\n`);
 
   // -----------------------------
+// Create Admin
+// -----------------------------
+console.log("\n🧑‍💼 Creating admin user...");
+await createUser({
+  name: "System Admin",
+  email: "admin@schooltrack.com",
+  phone: "0700009999",
+  password: "admin123",
+  role: "ADMIN",
+  schoolId: school.id,
+});
+
+
+  // -----------------------------
   // Helper: Create user safely
   // -----------------------------
   async function createUser({ name, email, phone, password, role, schoolId }) {

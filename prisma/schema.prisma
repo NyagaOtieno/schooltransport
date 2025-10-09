@@ -21,58 +21,55 @@ model School {
 }
 
 model BusLocation {
-  id           Int       @id @default(autoincrement())
-  busId        Int
-  deviceId     Int
-  lat          Float
-  lng          Float
-  direction    Int?
-  speed        Float?
-  state        String?
-  movement     String?
-  lastUpdate   DateTime
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  bus          Bus       @relation(fields: [busId], references: [id])
+  id         Int      @id @default(autoincrement())
+  busId      Int
+  deviceId   Int
+  lat        Float
+  lng        Float
+  direction  Int?
+  speed      Float?
+  state      String?
+  movement   String?
+  lastUpdate DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  bus        Bus      @relation(fields: [busId], references: [id])
 }
 
 model LiveLocation {
-  id             Int       @id @default(autoincrement())
-  vehicleReg     String    @unique
-  busId          Int?      // optional link to bus
-  lat            Float
-  lng            Float
-  direction      Float
-  speed          Float?
-  movementState  String?
-  lastUpdate     DateTime
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-
-  bus            Bus?      @relation(fields: [busId], references: [id])
+  id            Int      @id @default(autoincrement())
+  vehicleReg    String   @unique
+  busId         Int?
+  lat           Float
+  lng           Float
+  direction     Float
+  speed         Float?
+  movementState String?
+  lastUpdate    DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  bus           Bus?     @relation(fields: [busId], references: [id])
 }
 
 model Notification {
-  id           Int       @id @default(autoincrement())
-  parentId     Int
-  title        String
-  message      String
-  type         String
-  sentAt       DateTime  @default(now())
-  read         Boolean   @default(false)
-
-  parent       Parent    @relation(fields: [parentId], references: [id])
+  id       Int      @id @default(autoincrement())
+  parentId Int
+  title    String
+  message  String
+  type     String
+  sentAt   DateTime @default(now())
+  read     Boolean  @default(false)
+  parent   Parent   @relation(fields: [parentId], references: [id])
 }
 
 model Parent {
-  id          Int          @id @default(autoincrement())
-  name        String
-  phone       String        @unique
-  students    Student[]
+  id            Int            @id @default(autoincrement())
+  name          String
+  phone         String         @unique
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
   notifications Notification[]
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  students      Student[]
 }
 
 model User {
@@ -96,23 +93,23 @@ model User {
 }
 
 model Bus {
-  id             Int             @id @default(autoincrement())
-  name           String
-  plateNumber    String          @unique
-  capacity       Int
-  route          String
-  driverId       Int?
-  assistantId    Int?
-  createdAt      DateTime        @default(now())
-  schoolId       Int
-  updatedAt      DateTime        @updatedAt
-  assistant      User?           @relation("AssistantBus", fields: [assistantId], references: [id])
-  driver         User?           @relation("DriverBus", fields: [driverId], references: [id])
-  school         School          @relation(fields: [schoolId], references: [id])
-  manifests      Manifest[]
-  students       Student[]
-  liveLocations  LiveLocation[]
-  locations      BusLocation[]   // 👈 opposite side of BusLocation
+  id            Int            @id @default(autoincrement())
+  name          String
+  plateNumber   String         @unique
+  capacity      Int
+  route         String
+  driverId      Int?
+  assistantId   Int?
+  createdAt     DateTime       @default(now())
+  schoolId      Int
+  updatedAt     DateTime       @updatedAt
+  assistant     User?          @relation("AssistantBus", fields: [assistantId], references: [id])
+  driver        User?          @relation("DriverBus", fields: [driverId], references: [id])
+  school        School         @relation(fields: [schoolId], references: [id])
+  locations     BusLocation[]
+  liveLocations LiveLocation[]
+  manifests     Manifest[]
+  students      Student[]
 }
 
 model Student {
@@ -122,18 +119,17 @@ model Student {
   latitude  Float
   longitude Float
   busId     Int
-  parentId  Int
-  userId    Int?        // 👈 to match User.students
-  createdAt DateTime   @default(now())
+  parentId  Int?        // 👈 make optional
+  createdAt DateTime    @default(now())
   schoolId  Int
-  updatedAt DateTime   @updatedAt
+  updatedAt DateTime    @updatedAt
+  userId    Int?
   manifests Manifest[]
-  bus       Bus        @relation(fields: [busId], references: [id])
-  parent    Parent     @relation(fields: [parentId], references: [id])
-  school    School     @relation(fields: [schoolId], references: [id])
-  user      User?      @relation("UserStudent", fields: [userId], references: [id])
+  bus       Bus         @relation(fields: [busId], references: [id])
+  parent    Parent?     @relation(fields: [parentId], references: [id]) // 👈 make optional
+  school    School      @relation(fields: [schoolId], references: [id])
+  user      User?       @relation("UserStudent", fields: [userId], references: [id])
 }
-
 model Manifest {
   id          Int            @id @default(autoincrement())
   studentId   Int
