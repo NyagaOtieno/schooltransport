@@ -45,14 +45,11 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const studentId = parseId(req.params.id);
-
     const student = await prisma.student.findUnique({
       where: { id: studentId },
       include: studentInclude,
     });
-
     if (!student) return res.status(404).json({ status: "error", message: "Student not found" });
-
     res.json({ status: "success", data: student });
   } catch (error) {
     handleError(res, error, "Failed to fetch student");
@@ -64,7 +61,7 @@ router.get("/:id", async (req, res) => {
 // -----------------------------
 router.post("/", async (req, res) => {
   try {
-    const { name, grade, latitude, longitude, busId, schoolId, parentName, parentPhone, parentEmail } = req.body;
+    const { name, grade, latitude, longitude, busId, schoolId, parentName, parentPhone, parentEmail, parentPassword } = req.body;
 
     if (!busId || !schoolId || (!parentName && !parentPhone && !parentEmail)) {
       return res.status(400).json({
@@ -98,19 +95,19 @@ router.post("/", async (req, res) => {
 
     // Create parent + user if not exists
     if (!parent) {
-      const passwordHash = await bcrypt.hash("changeme", 10);
+      const hashedPassword = parentPassword ? await bcrypt.hash(parentPassword, 10) : await bcrypt.hash("changeme", 10);
       const user = await prisma.user.create({
-        data: { name: parentName, phone: parentPhone, email: parentEmail, schoolId, role: "PARENT", password: passwordHash },
+        data: { name: parentName, phone: parentPhone, email: parentEmail, password: hashedPassword, schoolId, role: "PARENT" },
       });
       parent = await prisma.parent.create({
-        data: { userId: user.id, schoolId },
+        data: { user: { connect: { id: user.id } } },
         include: { user: true },
       });
     }
 
     // Create student
     const student = await prisma.student.create({
-      data: { name, grade, latitude, longitude, busId, schoolId, parentId: parent.id },
+      data: { name, grade, latitude, longitude, busId, schoolId, parent: { connect: { id: parent.id } } },
       include: studentInclude,
     });
 
@@ -121,12 +118,12 @@ router.post("/", async (req, res) => {
 });
 
 // -----------------------------
-// UPDATE a student + safely handle parent info
+// UPDATE a student
 // -----------------------------
 router.put("/:id", async (req, res) => {
   try {
     const studentId = parseId(req.params.id);
-    const { parentName, parentPhone, parentEmail, ...studentData } = req.body;
+    const { parentName, parentPhone, parentEmail, parentPassword, ...studentData } = req.body;
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
@@ -134,48 +131,42 @@ router.put("/:id", async (req, res) => {
     });
     if (!student) return res.status(404).json({ status: "error", message: "Student not found" });
 
-    // Update student basic info
+    // Update student
     const updatedStudent = await prisma.student.update({
       where: { id: studentId },
       data: studentData,
       include: studentInclude,
     });
 
-    // Handle parent info safely
-    if (parentName || parentPhone || parentEmail) {
+    // Update parent & user if provided
+    if (parentName || parentPhone || parentEmail || parentPassword) {
       let parent = student.parent;
-      let userParent = parent?.user;
-
       if (!parent) {
-        parent = await prisma.parent.create({ data: { schoolId: student.schoolId } });
-        await prisma.student.update({ where: { id: studentId }, data: { parentId: parent.id } });
+        parent = await prisma.parent.create({});
+        await prisma.student.update({ where: { id: studentId }, data: { parent: { connect: { id: parent.id } } } });
       }
 
+      let userParent = parent.user;
       if (!userParent) {
-        const passwordHash = await bcrypt.hash("changeme", 10);
+        const hashedPassword = parentPassword ? await bcrypt.hash(parentPassword, 10) : await bcrypt.hash("changeme", 10);
         userParent = await prisma.user.create({
           data: {
             name: parentName || "Parent",
             phone: parentPhone || null,
             email: parentEmail || null,
-            password: passwordHash,
+            password: hashedPassword,
             schoolId: student.schoolId,
             role: "PARENT",
           },
         });
-        await prisma.parent.update({ where: { id: parent.id }, data: { userId: userParent.id } });
+        await prisma.parent.update({ where: { id: parent.id }, data: { user: { connect: { id: userParent.id } } } });
       } else {
-        const dataToUpdate = {};
-        if (parentName) dataToUpdate.name = parentName;
-        if (parentPhone) dataToUpdate.phone = parentPhone;
-        if (parentEmail) dataToUpdate.email = parentEmail;
-
-        if (Object.keys(dataToUpdate).length > 0) {
-          await prisma.user.update({
-            where: { id: userParent.id },
-            data: dataToUpdate,
-          });
-        }
+        const updateData = {};
+        if (parentName) updateData.name = parentName;
+        if (parentPhone) updateData.phone = parentPhone;
+        if (parentEmail) updateData.email = parentEmail;
+        if (parentPassword) updateData.password = await bcrypt.hash(parentPassword, 10);
+        if (Object.keys(updateData).length) await prisma.user.update({ where: { id: userParent.id }, data: updateData });
       }
     }
 
@@ -186,7 +177,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // -----------------------------
-// DELETE a student + cleanup parent/user if no other students
+// DELETE a student
 // -----------------------------
 router.delete("/:id", async (req, res) => {
   try {
@@ -203,9 +194,10 @@ router.delete("/:id", async (req, res) => {
 
     await prisma.student.delete({ where: { id: studentId } });
 
+    // Cleanup parent & user if no other students
     if (parent) {
-      const remainingStudents = await prisma.student.count({ where: { parentId: parent.id } });
-      if (remainingStudents === 0) {
+      const remaining = await prisma.student.count({ where: { parentId: parent.id } });
+      if (remaining === 0) {
         if (userParent) await prisma.user.delete({ where: { id: userParent.id } });
         await prisma.parent.delete({ where: { id: parent.id } });
       }
