@@ -11,13 +11,16 @@ const handleError = (res, error, message = "Server error") => {
   });
 };
 
+// Common Prisma include object for students
+const studentInclude = { school: true, bus: true, parent: { include: { user: true } } };
+
 // -----------------------------
 // Get all students
 // -----------------------------
 export const getStudents = async (req, res) => {
   try {
     const students = await prisma.student.findMany({
-      include: { school: true, bus: true, parent: { include: { user: true } } },
+      include: studentInclude,
       orderBy: { id: "desc" },
     });
     res.json({ status: "success", count: students.length, data: students });
@@ -36,7 +39,7 @@ export const getStudent = async (req, res) => {
 
     const student = await prisma.student.findUnique({
       where: { id },
-      include: { school: true, bus: true, parent: { include: { user: true } } },
+      include: studentInclude,
     });
 
     if (!student) return res.status(404).json({ status: "error", message: "Student not found" });
@@ -78,9 +81,7 @@ export const createStudent = async (req, res) => {
         include: { user: true },
       });
 
-      if (!parent) {
-        parent = await prisma.parent.create({ data: {} });
-      }
+      if (!parent) parent = await prisma.parent.create({ data: {} });
 
       await prisma.student.update({ where: { id: student.id }, data: { parentId: parent.id } });
 
@@ -95,18 +96,24 @@ export const createStudent = async (req, res) => {
         });
       } else {
         if (parentEmail) {
-          userParent = await prisma.user.findUnique({ where: { email_schoolId: { email: parentEmail, schoolId } } }).catch(() => null);
+          userParent = await prisma.user.findUnique({
+            where: { email_schoolId: { email: parentEmail, schoolId } },
+          }).catch(() => null);
         }
         if (!userParent && parentPhone) {
-          userParent = await prisma.user.findUnique({ where: { phone_schoolId: { phone: parentPhone, schoolId } } }).catch(() => null);
+          userParent = await prisma.user.findUnique({
+            where: { phone_schoolId: { phone: parentPhone, schoolId } },
+          }).catch(() => null);
         }
+
         if (!userParent) {
+          const passwordHash = await bcrypt.hash("changeme", 10);
           userParent = await prisma.user.create({
             data: {
               name: parentName || "Parent",
               phone: parentPhone || null,
               email: parentEmail || null,
-              password: await bcrypt.hash("changeme", 10),
+              password: passwordHash,
               schoolId,
               role: "PARENT",
             },
@@ -117,7 +124,13 @@ export const createStudent = async (req, res) => {
       }
     }
 
-    res.status(201).json({ status: "success", message: "Student created successfully", student, parent, userParent });
+    res.status(201).json({
+      status: "success",
+      message: "Student created successfully",
+      student,
+      parent,
+      userParent,
+    });
   } catch (error) {
     handleError(res, error);
   }
@@ -167,7 +180,11 @@ export const updateStudent = async (req, res) => {
       } else {
         await prisma.user.update({
           where: { id: userParent.id },
-          data: { name: parentName || userParent.name, phone: parentPhone || userParent.phone, email: parentEmail || userParent.email },
+          data: {
+            name: parentName || userParent.name,
+            phone: parentPhone || userParent.phone,
+            email: parentEmail || userParent.email,
+          },
         });
       }
     }
