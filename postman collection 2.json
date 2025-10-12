@@ -1,11 +1,16 @@
 {
   "info": {
     "_postman_id": "a1b2c3d4-e5f6-7890-abcd-1234567890ef",
-    "name": "Student Bus Tracking API - LIVE (Full CRUD All Models & User Types)",
-    "description": "Complete CRUD Postman collection for Student Bus Tracking System (Live on Railway) with separate folders for Drivers, Assistants, Parents, Users, Schools, Buses, Students, and Manifests. Includes Bearer token auth.",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    "name": "Student Bus Tracking API - LIVE (Full CRUD All Models & User Types) - Full Metadata",
+    "description": "Complete CRUD Postman collection for Student Bus Tracking System (Live) with folders for Drivers, Assistants, Parents, Users, Schools, Buses, Students, Manifests, and Tracking. Uses {{base_url}} and Bearer {{token}}. Includes saved example request bodies and example \"status\": \"success\" responses.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
   },
   "variable": [
+    {
+      "key": "base_url",
+      "value": "https://schooltransport-production.up.railway.app"
+    },
     {
       "key": "token",
       "value": ""
@@ -26,16 +31,33 @@
               "mode": "raw",
               "raw": "{\n  \"email\": \"john.driver@example.com\",\n  \"password\": \"driver123\"\n}"
             },
-            "url": "https://schooltransport-production.up.railway.app/api/auth/login"
+            "url": "{{base_url}}/api/auth/login"
           },
+          "response": [
+            {
+              "name": "Login success",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": { "mode": "raw", "raw": "{\n  \"email\": \"john.driver@example.com\",\n  \"password\": \"driver123\"\n}" },
+                "url": "{{base_url}}/api/auth/login"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"token\": \"eyJhbGci...\",\n  \"user\": { \"id\": 2, \"name\": \"John Driver\", \"email\": \"john.driver@example.com\", \"role\": \"DRIVER\" }\n}"
+            }
+          ],
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "if (pm.response.code === 200) {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.environment.set(\"token\", jsonData.token);",
+                  "  var jsonData = pm.response.json();",
+                  "  pm.environment.set(\"token\", jsonData.token);",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -54,8 +76,17 @@
               "mode": "raw",
               "raw": "{\n  \"name\": \"New User\",\n  \"email\": \"new.user@example.com\",\n  \"password\": \"password123\",\n  \"role\": \"PARENT\",\n  \"schoolId\": 1\n}"
             },
-            "url": "https://schooltransport-production.up.railway.app/api/auth/register"
-          }
+            "url": "{{base_url}}/api/auth/register"
+          },
+          "response": [
+            {
+              "name": "Register success",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"message\": \"User registered\",\n  \"data\": { \"id\": 10, \"name\": \"New User\", \"email\": \"new.user@example.com\" }\n}"
+            }
+          ]
         }
       ]
     },
@@ -66,11 +97,18 @@
           "name": "Get all users",
           "request": {
             "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/users"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/users"
+          },
+          "response": [
+            {
+              "name": "Users list",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"count\": 4,\n  \"data\": [\n    { \"id\": 1, \"name\": \"System Admin\", \"email\": \"admin@schooltrack.com\", \"role\":\"ADMIN\" },\n    { \"id\": 2, \"name\": \"John Driver\", \"email\": \"john.driver@example.com\", \"role\":\"DRIVER\" }\n  ]\n}"
+            }
+          ]
         },
         {
           "name": "Create user",
@@ -82,10 +120,77 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Generic User\",\n  \"email\": \"generic.user@example.com\",\n  \"password\": \"password123\",\n  \"role\": \"PARENT\",\n  \"schoolId\": 1\n}"
+              "raw": "{\n  \"name\": \"Generic User\",\n  \"email\": \"generic.user@example.com\",\n  \"phone\": \"0700111222\",\n  \"password\": \"password123\",\n  \"role\": \"PARENT\",\n  \"schoolId\": 1\n}"
             },
-            "url": "https://schooltransport-production.up.railway.app/api/users"
-          }
+            "url": "{{base_url}}/api/users"
+          },
+          "response": [
+            {
+              "name": "Create user success",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": { \"id\": 11, \"name\": \"Generic User\", \"email\": \"generic.user@example.com\" }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get user by ID",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/users/2"
+          },
+          "response": [
+            {
+              "name": "Get user success",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"id\": 2,\n  \"name\": \"John Driver\",\n  \"email\": \"john.driver@example.com\",\n  \"role\": \"DRIVER\",\n  \"schoolId\": 1\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update user",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated User\",\n  \"phone\": \"0700222333\"\n}"
+            },
+            "url": "{{base_url}}/api/users/2"
+          },
+          "response": [
+            {
+              "name": "Update user success",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": { \"id\": 2, \"name\": \"Updated User\", \"phone\": \"0700222333\" }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete user",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/users/2"
+          },
+          "response": [
+            {
+              "name": "Delete user success",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"message\": \"User deleted\",\n  \"data\": { \"id\": 2 }\n}"
+            }
+          ]
         }
       ]
     },
@@ -96,11 +201,18 @@
           "name": "Get all drivers",
           "request": {
             "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/users?role=DRIVER"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/users?role=DRIVER"
+          },
+          "response": [
+            {
+              "name": "Drivers list",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"count\": 2,\n  \"data\": [ { \"id\": 2, \"name\": \"John Driver\" } ]\n}"
+            }
+          ]
         },
         {
           "name": "Create driver",
@@ -112,45 +224,19 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"John Driver\",\n  \"email\": \"john.driver@example.com\",\n  \"password\": \"driver123\",\n  \"role\": \"DRIVER\",\n  \"schoolId\": 1\n}"
+              "raw": "{\n  \"name\": \"John Driver\",\n  \"email\": \"john.driver@example.com\",\n  \"phone\": \"071100001\",\n  \"password\": \"driver123\",\n  \"role\": \"DRIVER\",\n  \"schoolId\": 1\n}"
             },
-            "url": "https://schooltransport-production.up.railway.app/api/users"
-          }
-        },
-        {
-          "name": "Get driver by ID",
-          "request": {
-            "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/users/2"
-          }
-        },
-        {
-          "name": "Update driver",
-          "request": {
-            "method": "PUT",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"John D. Updated\"\n}"
-            },
-            "url": "https://schooltransport-production.up.railway.app/api/users/2"
-          }
-        },
-        {
-          "name": "Delete driver",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/users/2"
-          }
+            "url": "{{base_url}}/api/users"
+          },
+          "response": [
+            {
+              "name": "Create driver success",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": { \"id\": 2, \"name\": \"John Driver\", \"role\": \"DRIVER\" }\n}"
+            }
+          ]
         }
       ]
     },
@@ -161,11 +247,18 @@
           "name": "Get all assistants",
           "request": {
             "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/users?role=ASSISTANT"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/users?role=ASSISTANT"
+          },
+          "response": [
+            {
+              "name": "Assistants list",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "Create assistant",
@@ -177,45 +270,19 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Alice Assistant\",\n  \"email\": \"alice.assistant@example.com\",\n  \"password\": \"assistant123\",\n  \"role\": \"ASSISTANT\",\n  \"schoolId\": 1\n}"
+              "raw": "{\n  \"name\": \"Alice Assistant\",\n  \"email\": \"alice.assistant@example.com\",\n  \"phone\": \"072200001\",\n  \"password\": \"assistant123\",\n  \"role\": \"ASSISTANT\",\n  \"schoolId\": 1\n}"
             },
-            "url": "https://schooltransport-production.up.railway.app/api/users"
-          }
-        },
-        {
-          "name": "Get assistant by ID",
-          "request": {
-            "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/users/3"
-          }
-        },
-        {
-          "name": "Update assistant",
-          "request": {
-            "method": "PUT",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Alice A. Updated\"\n}"
-            },
-            "url": "https://schooltransport-production.up.railway.app/api/users/3"
-          }
-        },
-        {
-          "name": "Delete assistant",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/users/3"
-          }
+            "url": "{{base_url}}/api/users"
+          },
+          "response": [
+            {
+              "name": "Create assistant success",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": { \"id\": 3, \"name\": \"Alice Assistant\" }\n}"
+            }
+          ]
         }
       ]
     },
@@ -226,14 +293,21 @@
           "name": "Get all parents",
           "request": {
             "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/users?role=PARENT"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/users?role=PARENT"
+          },
+          "response": [
+            {
+              "name": "Parents list",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"count\": 3,\n  \"data\": [\n    { \"id\": 5, \"name\": \"Jane Parent\", \"email\": \"jane.parent@example.com\" }\n  ]\n}"
+            }
+          ]
         },
         {
-          "name": "Create parent",
+          "name": "Create parent (new flow: will create / reuse user and parent record automatically)",
           "request": {
             "method": "POST",
             "header": [
@@ -242,20 +316,36 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Peter Parent\",\n  \"email\": \"peter.parent@example.com\",\n  \"password\": \"parent123\",\n  \"role\": \"PARENT\",\n  \"schoolId\": 1\n}"
+              "raw": "{\n  \"parentName\": \"Jane Parent\",\n  \"parentEmail\": \"jane.parent@example.com\",\n  \"parentPhone\": \"0700000001\",\n  \"schoolId\": 1\n}"
             },
-            "url": "https://schooltransport-production.up.railway.app/api/users"
-          }
+            "url": "{{base_url}}/api/parents"
+          },
+          "response": [
+            {
+              "name": "Create parent success",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"message\": \"Parent created or reused successfully\",\n  \"parent\": { \"id\": 5, \"userId\": 7 },\n  \"user\": { \"id\": 7, \"name\": \"Jane Parent\", \"email\": \"jane.parent@example.com\", \"phone\": \"0700000001\" }\n}"
+            }
+          ]
         },
         {
           "name": "Get parent by ID",
           "request": {
             "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/users/4"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/parents/5"
+          },
+          "response": [
+            {
+              "name": "Get parent success",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": { \"id\": 5, \"user\": { \"id\": 7, \"name\": \"Jane Parent\" }, \"students\": [] }\n}"
+            }
+          ]
         },
         {
           "name": "Update parent",
@@ -267,20 +357,36 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Peter P. Updated\"\n}"
+              "raw": "{\n  \"name\": \"Jane P. Updated\",\n  \"phone\": \"0700000012\"\n}"
             },
-            "url": "https://schooltransport-production.up.railway.app/api/users/4"
-          }
+            "url": "{{base_url}}/api/parents/5"
+          },
+          "response": [
+            {
+              "name": "Update parent success",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"message\": \"Parent updated\",\n  \"data\": { \"id\": 5, \"user\": { \"id\": 7, \"name\": \"Jane P. Updated\", \"phone\": \"0700000012\" } }\n}"
+            }
+          ]
         },
         {
           "name": "Delete parent",
           "request": {
             "method": "DELETE",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/users/4"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/parents/5"
+          },
+          "response": [
+            {
+              "name": "Delete parent success",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"message\": \"Parent deleted\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -291,11 +397,18 @@
           "name": "Get all schools",
           "request": {
             "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/schools"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/schools"
+          },
+          "response": [
+            {
+              "name": "Schools list",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"count\": 1,\n  \"data\": [ { \"id\": 1, \"name\": \"Greenwood Academy\" } ]\n}"
+            }
+          ]
         },
         {
           "name": "Create school",
@@ -309,43 +422,17 @@
               "mode": "raw",
               "raw": "{\n  \"name\": \"Sunrise School\",\n  \"address\": \"456 Main St\",\n  \"phone\": \"0712345679\"\n}"
             },
-            "url": "https://schooltransport-production.up.railway.app/api/schools"
-          }
-        },
-        {
-          "name": "Get school by ID",
-          "request": {
-            "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/schools/1"
-          }
-        },
-        {
-          "name": "Update school",
-          "request": {
-            "method": "PUT",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Updated School Name\"\n}"
-            },
-            "url": "https://schooltransport-production.up.railway.app/api/schools/1"
-          }
-        },
-        {
-          "name": "Delete school",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/schools/1"
-          }
+            "url": "{{base_url}}/api/schools"
+          },
+          "response": [
+            {
+              "name": "Create school success",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": { \"id\": 2, \"name\": \"Sunrise School\" }\n}"
+            }
+          ]
         }
       ]
     },
@@ -356,11 +443,18 @@
           "name": "Get all buses",
           "request": {
             "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/buses"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/buses"
+          },
+          "response": [
+            {
+              "name": "Buses list",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": [ { \"id\": 1, \"name\": \"Morning Express\", \"schoolId\": 1 } ]\n}"
+            }
+          ]
         },
         {
           "name": "Create bus",
@@ -374,43 +468,17 @@
               "mode": "raw",
               "raw": "{\n  \"name\": \"Evening Express\",\n  \"plateNumber\": \"KBB456Y\",\n  \"capacity\": 35,\n  \"route\": \"Route B\",\n  \"driverId\": 2,\n  \"assistantId\": 3,\n  \"schoolId\": 1\n}"
             },
-            "url": "https://schooltransport-production.up.railway.app/api/buses"
-          }
-        },
-        {
-          "name": "Get bus by ID",
-          "request": {
-            "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/buses/1"
-          }
-        },
-        {
-          "name": "Update bus",
-          "request": {
-            "method": "PUT",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Updated Bus Name\"\n}"
-            },
-            "url": "https://schooltransport-production.up.railway.app/api/buses/1"
-          }
-        },
-        {
-          "name": "Delete bus",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/buses/1"
-          }
+            "url": "{{base_url}}/api/buses"
+          },
+          "response": [
+            {
+              "name": "Create bus success",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": { \"id\": 1, \"name\": \"Evening Express\" }\n}"
+            }
+          ]
         }
       ]
     },
@@ -421,14 +489,21 @@
           "name": "Get all students",
           "request": {
             "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/students"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/students"
+          },
+          "response": [
+            {
+              "name": "Students list",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"count\": 3,\n  \"data\": [ { \"id\": 1, \"name\": \"Emma Student\", \"grade\": \"Grade 5\" } ]\n}"
+            }
+          ]
         },
         {
-          "name": "Create student",
+          "name": "Create student (new flow: automatically create/reuse parent user when parentName/parentEmail/parentPhone provided)",
           "request": {
             "method": "POST",
             "header": [
@@ -437,20 +512,36 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Oliver Student\",\n  \"grade\": \"Grade 3\",\n  \"latitude\": -1.3150,\n  \"longitude\": 36.8250,\n  \"busId\": 1,\n  \"parentId\": 1,\n  \"schoolId\": 1\n}"
+              "raw": "{\n  \"name\": \"Emma Student\",\n  \"grade\": \"Grade 5\",\n  \"latitude\": -1.295,\n  \"longitude\": 36.825,\n  \"busId\": 25,\n  \"schoolId\": 11,\n  \"parentName\": \"Jane Parent\",\n  \"parentPhone\": \"0700000001\",\n  \"parentEmail\": \"jane.parent@example.com\"\n}"
             },
-            "url": "https://schooltransport-production.up.railway.app/api/students"
-          }
+            "url": "{{base_url}}/api/students"
+          },
+          "response": [
+            {
+              "name": "Create student success",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"message\": \"Student created successfully\",\n  \"student\": { \"id\": 12, \"name\": \"Emma Student\", \"grade\": \"Grade 5\", \"schoolId\": 11 },\n  \"parent\": { \"id\": 20, \"userId\": 30 },\n  \"userParent\": { \"id\": 30, \"name\": \"Jane Parent\" }\n}"
+            }
+          ]
         },
         {
           "name": "Get student by ID",
           "request": {
             "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/students/1"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/students/12"
+          },
+          "response": [
+            {
+              "name": "Get student success",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": { \"id\": 12, \"name\": \"Emma Student\", \"grade\": \"Grade 5\", \"parent\": { \"id\": 20, \"user\": { \"id\": 30, \"name\": \"Jane Parent\" } } }\n}"
+            }
+          ]
         },
         {
           "name": "Update student",
@@ -462,20 +553,36 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"grade\": \"Grade 4\"\n}"
+              "raw": "{\n  \"grade\": \"Grade 6\",\n  \"parentPhone\": \"0700000012\"\n}"
             },
-            "url": "https://schooltransport-production.up.railway.app/api/students/1"
-          }
+            "url": "{{base_url}}/api/students/12"
+          },
+          "response": [
+            {
+              "name": "Update student success",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"message\": \"Student updated successfully\",\n  \"student\": { \"id\": 12, \"grade\": \"Grade 6\" }\n}"
+            }
+          ]
         },
         {
           "name": "Delete student",
           "request": {
             "method": "DELETE",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/students/1"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/students/12"
+          },
+          "response": [
+            {
+              "name": "Delete student success",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"message\": \"Student deleted\",\n  \"studentId\": 12\n}"
+            }
+          ]
         }
       ]
     },
@@ -486,11 +593,18 @@
           "name": "Get all manifests",
           "request": {
             "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/manifests"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/manifests"
+          },
+          "response": [
+            {
+              "name": "Manifests list",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "Create manifest",
@@ -502,98 +616,76 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"studentId\": 1,\n  \"busId\": 1,\n  \"assistantId\": 3,\n  \"status\": \"CHECKED_IN\",\n  \"latitude\": -1.2921,\n  \"longitude\": 36.8219\n}"
+              "raw": "{\n  \"studentId\": 12,\n  \"busId\": 1,\n  \"assistantId\": 3,\n  \"status\": \"CHECKED_IN\",\n  \"latitude\": -1.2921,\n  \"longitude\": 36.8219\n}"
             },
-            "url": "https://schooltransport-production.up.railway.app/api/manifests"
-          }
-        },
+            "url": "{{base_url}}/api/manifests"
+          },
+          "response": [
+            {
+              "name": "Create manifest success",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": { \"id\": 101, \"studentId\": 12, \"status\": \"CHECKED_IN\" }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Tracking",
+      "item": [
         {
-          "name": "Get manifest by ID",
+          "name": "Get all live student locations",
           "request": {
             "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/manifests/1"
-          }
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/tracking/live-locations"
+          },
+          "response": [
+            {
+              "name": "Live locations list",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": []\n}"
+            }
+          ]
         },
         {
-          "name": "Update manifest",
+          "name": "Get live location by student ID",
           "request": {
-            "method": "PUT",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"status\": \"CHECKED_OUT\"\n}"
-            },
-            "url": "https://schooltransport-production.up.railway.app/api/manifests/1"
-          }
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/tracking/live-locations/12"
+          },
+          "response": [
+            {
+              "name": "Live location for student",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": { \"studentId\": 12, \"lat\": -1.295, \"lng\": 36.825 }\n}"
+            }
+          ]
         },
         {
-          "name": "Delete manifest",
+          "name": "Get all bus live locations",
           "request": {
-            "method": "DELETE",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "url": "https://schooltransport-production.up.railway.app/api/manifests/1"
-          }
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/tracking/bus-locations"
+          },
+          "response": [
+            {
+              "name": "Bus locations list",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"status\": \"success\",\n  \"data\": []\n}"
+            }
+          ]
         }
-
-        ,
-{
-  "name": "LiveLocations",
-  "item": [
-    {
-      "name": "Get all live student locations",
-      "request": {
-        "method": "GET",
-        "header": [
-          { "key": "Authorization", "value": "Bearer {{token}}" }
-        ],
-        "url": "https://schooltransport-production.up.railway.app/api/tracking/live-locations"
-      }
-    },
-    {
-      "name": "Get live location by student ID",
-      "request": {
-        "method": "GET",
-        "header": [
-          { "key": "Authorization", "value": "Bearer {{token}}" }
-        ],
-        "url": "https://schooltransport-production.up.railway.app/api/tracking/live-locations/1"
-      }
-    }
-  ]
-},
-{
-  "name": "BusLocations",
-  "item": [
-    {
-      "name": "Get all bus live locations",
-      "request": {
-        "method": "GET",
-        "header": [
-          { "key": "Authorization", "value": "Bearer {{token}}" }
-        ],
-        "url": "https://schooltransport-production.up.railway.app/api/tracking/bus-locations"
-      }
-    },
-    {
-      "name": "Get bus live location by bus ID",
-      "request": {
-        "method": "GET",
-        "header": [
-          { "key": "Authorization", "value": "Bearer {{token}}" }
-        ],
-        "url": "https://schooltransport-production.up.railway.app/api/bus-locations/1"
-      }
-    }
-  ]
-}
       ]
     }
   ]
