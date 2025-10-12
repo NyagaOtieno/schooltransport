@@ -80,7 +80,7 @@ router.post("/", async (req, res) => {
     if (bus.schoolId !== schoolId) return res.status(400).json({ status: "error", message: "Bus does not belong to this school" });
 
     // Check if parent exists
-    let parent;
+    let parent = null;
     if (parentPhone || parentEmail) {
       parent = await prisma.parent.findFirst({
         where: {
@@ -105,9 +105,9 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // Create student
+    // Create student using parentId
     const student = await prisma.student.create({
-      data: { name, grade, latitude, longitude, busId, schoolId, parent: { connect: { id: parent.id } } },
+      data: { name, grade, latitude, longitude, busId, schoolId, parentId: parent.id },
       include: studentInclude,
     });
 
@@ -143,7 +143,7 @@ router.put("/:id", async (req, res) => {
       let parent = student.parent;
       if (!parent) {
         parent = await prisma.parent.create({});
-        await prisma.student.update({ where: { id: studentId }, data: { parent: { connect: { id: parent.id } } } });
+        await prisma.student.update({ where: { id: studentId }, data: { parentId: parent.id } });
       }
 
       let userParent = parent.user;
