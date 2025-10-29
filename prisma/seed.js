@@ -170,15 +170,13 @@ async function main() {
 
   // -----------------------------
   // Create Buses
-  // -----------------------------
-  console.log("🚌 Creating buses...");
-  const busData = [
-    { name: "Morning Express", plate: "KAA123X", route: "Route A - City to School" },
-    { name: "Sunrise Shuttle", plate: "KBB456Y", route: "Route B - Westlands to School" },
-    { name: "Evening Cruiser", plate: "KCC789Z", route: "Route C - South B to School" },
-    { name: "Highway Comet", plate: "KDD101A", route: "Route D - Embakasi to School" },
-  ];
-
+console.log("🚌 Creating buses...");
+const busData = [
+  { name: "Morning Express", plate: "API Test", route: "Route A - City to School" },
+  { name: "Sunrise Shuttle", plate: "KBB456Y", route: "Route B - Westlands to School" },
+  { name: "Evening Cruiser", plate: "KCC789Z", route: "Route C - South B to School" },
+  { name: "Highway Comet", plate: "KDD101A", route: "Route D - Embakasi to School" },
+];
   const buses = [];
   for (let i = 0; i < busData.length; i++) {
     buses.push(await prisma.bus.create({

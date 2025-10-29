@@ -4,8 +4,9 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const LOC8_API_URL = "https://myfleet.track-loc8.com/api/v1/unit.json";
-const LOC8_API_KEY = "44e824d4f70647af1bb9a314b4de7e73951c8ad6";
+const LOC8_API_URL = process.env.LOC8_API_URL;
+const LOC8_API_KEY = process.env.LOC8_API_KEY;
+
 
 // -----------------------------
 // Sync live locations from tracker
