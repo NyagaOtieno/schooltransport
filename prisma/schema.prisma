@@ -149,6 +149,8 @@ model Manifest {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   status      ManifestStatus
+  session     ManifestSession @default(MORNING)
+
   assistant   User?          @relation("AssistantManifest", fields: [assistantId], references: [id])
   bus         Bus            @relation(fields: [busId], references: [id])
   student     Student        @relation(fields: [studentId], references: [id])
@@ -164,4 +166,10 @@ enum Role {
 enum ManifestStatus {
   CHECKED_IN
   CHECKED_OUT
+}
+
+
+enum ManifestSession {
+  MORNING
+  EVENING
 }

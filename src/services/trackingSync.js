@@ -1,12 +1,11 @@
 // src/services/trackingSync.js
-import axios from "axios";
+import axios from "axios"; // ✅ use axios directly here (not frontend api)
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
 const LOC8_API_URL = process.env.LOC8_API_URL;
 const LOC8_API_KEY = process.env.LOC8_API_KEY;
-
 
 // -----------------------------
 // Sync live locations from tracker
@@ -15,6 +14,7 @@ export const syncLiveLocations = async () => {
   console.log("🚀 Starting live location sync...");
 
   try {
+    // ✅ use axios directly — backend should call external APIs itself
     const { data } = await axios.get(`${LOC8_API_URL}?key=${LOC8_API_KEY}`);
     const units = data?.data?.units || [];
 
@@ -100,7 +100,6 @@ export const getBusLocations = async () => {
 
     const busLocations = await Promise.all(
       buses.map(async (bus) => {
-        // Match by busId for accuracy
         const live = await prisma.liveLocation.findFirst({
           where: { busId: bus.id },
           orderBy: { lastUpdate: "desc" },
