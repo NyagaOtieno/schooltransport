@@ -16,7 +16,7 @@ import prisma from "./src/middleware/prisma.js";
 // -----------------------------
 import smsRoutes from "./src/routes/sms.routes.js";
 import notificationRoutes from "./src/routes/notification.routes.js";
-import manifestRoutes from "./src/routes/manifest.routes.js";
+import manifestRoutes from "./src/routes/manifestRoutes.js";
 
 const PORT = process.env.PORT || 5000;
 
