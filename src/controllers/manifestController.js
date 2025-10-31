@@ -1,40 +1,69 @@
 import prisma from "../middleware/prisma.js";
+import { notifyParent } from "../services/notification.service.js";
 
-// ✅ Get all manifests
+/**
+ * ✅ Get all manifests
+ */
 export const getManifests = async (req, res) => {
   try {
     const manifests = await prisma.manifest.findMany({
       include: { student: true, bus: true, assistant: true },
       orderBy: { createdAt: "desc" },
     });
-    res.status(200).json({ success: true, data: manifests });
+
+    res.status(200).json({
+      success: true,
+      count: manifests.length,
+      data: manifests,
+    });
   } catch (error) {
-    console.error("Error fetching manifests:", error);
-    res.status(500).json({ success: false, message: "Server error fetching manifests" });
+    console.error("❌ Error fetching manifests:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error fetching manifests" });
   }
 };
 
-// ✅ Get single manifest
+/**
+ * ✅ Get single manifest
+ */
 export const getManifest = async (req, res) => {
   try {
     const manifest = await prisma.manifest.findUnique({
       where: { id: Number(req.params.id) },
       include: { student: true, bus: true, assistant: true },
     });
-    if (!manifest) return res.status(404).json({ success: false, message: "Manifest not found" });
+
+    if (!manifest) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Manifest not found" });
+    }
+
     res.status(200).json({ success: true, data: manifest });
   } catch (error) {
-    console.error("Error fetching manifest:", error);
-    res.status(500).json({ success: false, message: "Server error fetching manifest" });
+    console.error("❌ Error fetching manifest:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error fetching manifest" });
   }
 };
 
-// ✅ Create manifest with session (MORNING/EVENING)
+/**
+ * ✅ Create manifest (auto morning/evening session)
+ */
 export const createManifest = async (req, res) => {
   try {
-    const { studentId, busId, assistantId, latitude, longitude, status, session } = req.body;
+    const {
+      studentId,
+      busId,
+      assistantId,
+      latitude,
+      longitude,
+      status,
+      session,
+    } = req.body;
 
-    // auto-detect session if not provided
     const now = new Date();
     const hours = now.getHours();
     const finalSession = session || (hours < 12 ? "MORNING" : "EVENING");
@@ -47,18 +76,36 @@ export const createManifest = async (req, res) => {
         latitude,
         longitude,
         status,
-        session: finalSession, // ✅ ensures morning/evening stored correctly
+        session: finalSession,
       },
+      include: { student: true, bus: true, assistant: true },
     });
 
-    res.status(201).json({ success: true, message: "Manifest created successfully", data: manifest });
+    // 🔔 Optional: Notify parent if status is onboarding/offboarding
+    if (["onBoard", "offBoard"].includes(status)) {
+      try {
+        await notifyParent(status, manifest.student, manifest.bus?.plateNumber);
+      } catch (notifyError) {
+        console.warn("⚠️ Failed to send SMS notification:", notifyError.message);
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Manifest created successfully",
+      data: manifest,
+    });
   } catch (error) {
-    console.error("Error creating manifest:", error);
-    res.status(500).json({ success: false, message: "Server error creating manifest" });
+    console.error("❌ Error creating manifest:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error creating manifest" });
   }
 };
 
-// ✅ Update manifest
+/**
+ * ✅ Update manifest (with SMS trigger)
+ */
 export const updateManifest = async (req, res) => {
   try {
     const { id } = req.params;
@@ -67,23 +114,47 @@ export const updateManifest = async (req, res) => {
     const updated = await prisma.manifest.update({
       where: { id: Number(id) },
       data,
+      include: { student: true, bus: true },
     });
 
-    res.status(200).json({ success: true, message: "Manifest updated successfully", data: updated });
+    // 🔔 Notify parent when status changes to onboard/offboard
+    if (["onBoard", "offBoard"].includes(data.status)) {
+      try {
+        await notifyParent(data.status, updated.student, updated.bus?.plateNumber);
+      } catch (notifyError) {
+        console.warn("⚠️ Failed to send SMS notification:", notifyError.message);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Manifest updated successfully",
+      data: updated,
+    });
   } catch (error) {
-    console.error("Error updating manifest:", error);
-    res.status(500).json({ success: false, message: "Server error updating manifest" });
+    console.error("❌ Error updating manifest:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error updating manifest" });
   }
 };
 
-// ✅ Delete manifest
+/**
+ * ✅ Delete manifest
+ */
 export const deleteManifest = async (req, res) => {
   try {
     const { id } = req.params;
+
     await prisma.manifest.delete({ where: { id: Number(id) } });
-    res.status(200).json({ success: true, message: "Manifest deleted successfully" });
+
+    res
+      .status(200)
+      .json({ success: true, message: "Manifest deleted successfully" });
   } catch (error) {
-    console.error("Error deleting manifest:", error);
-    res.status(500).json({ success: false, message: "Server error deleting manifest" });
+    console.error("❌ Error deleting manifest:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error deleting manifest" });
   }
 };

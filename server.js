@@ -1,10 +1,54 @@
+// -----------------------------
+// Load environment + dependencies
+// -----------------------------
 import dotenv from "dotenv";
-dotenv.config(); // Load environment variables first
-import "./cron.js"; // put this at the top of server.js
+dotenv.config(); // Load .env first
+
+// Run any scheduled jobs (cron)
+import "./cron.js";
+
+// Core imports
 import app from "./src/app.js";
 import prisma from "./src/middleware/prisma.js";
 
+// -----------------------------
+// Import notification & manifest routes
+// -----------------------------
+import smsRoutes from "./src/routes/sms.routes.js";
+import notificationRoutes from "./src/routes/notification.routes.js";
+import manifestRoutes from "./src/routes/manifest.routes.js";
+
 const PORT = process.env.PORT || 5000;
+
+// -----------------------------
+// Register main routes
+// -----------------------------
+app.use("/api/sms", smsRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/manifests", manifestRoutes);
+
+// -----------------------------
+// Middleware: Log all incoming requests
+// -----------------------------
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
+// -----------------------------
+// Health check route (important for Railway / Render / Docker)
+// -----------------------------
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", message: "API is running 🚀" });
+});
+
+// -----------------------------
+// Catch-all route for unknown endpoints
+// -----------------------------
+app.use((req, res) => {
+  console.warn(`⚠️ 404 Not Found: ${req.method} ${req.url}`);
+  res.status(404).json({ error: "Route not found" });
+});
 
 // -----------------------------
 // Helper: Retry Prisma connection
@@ -23,29 +67,6 @@ const connectPrisma = async (retries = 5, delay = 2000) => {
     }
   }
 };
-
-// -----------------------------
-// Middleware: Log all incoming requests
-// -----------------------------
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  next();
-});
-
-// -----------------------------
-// Health check route (important for Railway)
-// -----------------------------
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", message: "API is running 🚀" });
-});
-
-// -----------------------------
-// Catch-all route for unknown endpoints
-// -----------------------------
-app.use((req, res) => {
-  console.warn(`⚠️ 404 Not Found: ${req.method} ${req.url}`);
-  res.status(404).json({ error: "Route not found" });
-});
 
 // -----------------------------
 // Graceful shutdown function
