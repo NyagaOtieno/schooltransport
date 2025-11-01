@@ -1,6 +1,6 @@
 import express from "express";
 import prisma from "../middleware/prisma.js";
-import { notifyParent } from "../services/notification.service.js"; // ✅ Import SMS service
+import { notifyParent } from "../services/notification.service.js";
 
 const router = express.Router();
 
@@ -38,8 +38,15 @@ router.post("/", async (req, res) => {
   try {
     const { studentId, busId, assistantId, status, latitude, longitude, session } = req.body;
 
-    // Validate student, bus, assistant existence
-    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    // Validate student, bus, assistant existence and fetch related parent data
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      include: {
+        parent: {
+          include: { user: true },
+        },
+      },
+    });
     const bus = await prisma.bus.findUnique({ where: { id: busId } });
     const assistant = await prisma.user.findUnique({ where: { id: assistantId } });
 
@@ -100,9 +107,20 @@ router.post("/", async (req, res) => {
 
     // 🔔 Send SMS notification
     try {
-      const eventType = status === "ONBOARD" ? "onBoard" : "offBoard";
-      const busNumber = bus?.numberPlate || bus?.id;
-      await notifyParent(eventType, student, busNumber);
+      const parentPhone = student?.parent?.user?.phone;
+      if (parentPhone) {
+        const eventType = status === "ONBOARD" ? "onBoard" : "offBoard";
+        const busNumber = bus?.plateNumber || bus?.id;
+        await notifyParent({
+          parentPhone,
+          studentName: student.name,
+          eventType,
+          busNumber,
+          session: sessionValue,
+        });
+      } else {
+        console.warn(`⚠️ Missing parent phone number for student: ${student?.name}`);
+      }
     } catch (smsError) {
       console.error("❌ SMS sending error:", smsError);
     }

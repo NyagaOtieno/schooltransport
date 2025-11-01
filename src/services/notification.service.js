@@ -1,22 +1,15 @@
 import { sendSms } from "../utils/smsGateway.js";
 
-export async function notifyParent(eventType, student, busNumber) {
-  if (!student?.parentPhone) {
-    console.warn("⚠️ Missing parent phone number for student:", student?.name);
-    return;
-  }
+export async function notifyParent({ parentPhone, studentName, eventType, busNumber, session }) {
+  const action = eventType === "onBoard" ? "boarded" : "alighted from";
+  const message = `${studentName} has ${action} bus ${busNumber} for the ${session} session.`;
 
-  const message =
-    eventType === "onBoard"
-      ? `${student.name} has boarded bus ${busNumber}.`
-      : `${student.name} has alighted from bus ${busNumber}.`;
-
-  const result = await sendSms(student.parentPhone, message);
+  const result = await sendSms(parentPhone, message);
 
   if (result.success) {
-    console.log(`✅ SMS sent to ${student.parentPhone}: ${message}`);
+    console.log(`✅ SMS sent to ${parentPhone}: ${message}`);
   } else {
-    console.error(`❌ Failed to send SMS:`, result.error);
+    console.error(`❌ Failed to send SMS to ${parentPhone}:`, result.error);
   }
 
   return result;
