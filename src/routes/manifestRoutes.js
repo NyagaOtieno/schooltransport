@@ -1,5 +1,6 @@
 import express from "express";
 import prisma from "../middleware/prisma.js";
+import { notifyParent } from "../services/notification.service.js"; // ✅ Import SMS service
 
 const router = express.Router();
 
@@ -96,6 +97,15 @@ router.post("/", async (req, res) => {
         session: sessionValue,
       },
     });
+
+    // 🔔 Send SMS notification
+    try {
+      const eventType = status === "ONBOARD" ? "onBoard" : "offBoard";
+      const busNumber = bus?.numberPlate || bus?.id;
+      await notifyParent(eventType, student, busNumber);
+    } catch (smsError) {
+      console.error("❌ SMS sending error:", smsError);
+    }
 
     res.status(201).json({
       success: true,
