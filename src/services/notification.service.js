@@ -22,7 +22,7 @@ export async function notifyParent({
         ? "has boarded"
         : mappedEventType === "offBoard"
         ? "has alighted from"
-        : "has Onboarded";
+        : " Onboarded";
 
     const message = `Dear ${parentName}, we wish to notify you that your child ${studentName} has safely ${action} vehicle registration ${busNumber} for the ${session} session. Follow this link to track: https://trackmykid.vercel.app/.`;
 
