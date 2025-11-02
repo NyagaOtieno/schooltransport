@@ -108,17 +108,19 @@ router.post("/", async (req, res) => {
     // 🔔 Send SMS notification
     try {
       const parentPhone = student?.parent?.user?.phone;
+      const fullParentName = student.parent?.user?.name || "Parent";
+      const firstName = fullParentName.split(" ")[0]; // ✅ Extract first name
       if (parentPhone) {
         const eventType = status === "ONBOARD" ? "onBoard" : "offBoard";
         const busNumber = bus?.plateNumber || bus?.id;
-        await notifyParent({
-          parentPhone,
-          parentName: student.parentName,
-          studentName: student.name,
-          eventType,
-          busNumber,
-          session: sessionValue,
-        });
+      await notifyParent({
+  parentPhone,
+  parentName: firstName,
+  studentName: student.name,
+  eventType,
+  busNumber,
+  session: sessionValue,
+});
       } else {
         console.warn(`⚠️ Missing parent phone number for student: ${student?.name}`);
       }
