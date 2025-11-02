@@ -9,7 +9,12 @@ export async function notifyParent({
   session,
 }) {
   try {
-    const action = eventType === "onBoard" ? "boarded" : "alighted from";
+       const action =
+      eventType === "onBoard"
+        ? "has boarded"
+        : eventType === "offBoard"
+        ? "has alighted from"
+        : "has updated status on";
     const message = `Dear ${parentName}, we wish to notify you that your Child ${studentName} has safely ${action} vehicle registration ${busNumber} for the ${session} session. Follow this link to fuata the steps https://trackmykid.vercel.app/.`;
 
     const result = await sendSms(parentPhone, message);
