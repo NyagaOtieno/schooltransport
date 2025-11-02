@@ -50,7 +50,7 @@ export const getManifest = async (req, res) => {
 };
 
 /**
- * ✅ Create manifest (auto morning/evening session)
+ * ✅ Create manifest (auto morning/evening session, with boardingTime/first location)
  */
 export const createManifest = async (req, res) => {
   try {
@@ -68,20 +68,31 @@ export const createManifest = async (req, res) => {
     const hours = now.getHours();
     const finalSession = session || (hours < 12 ? "MORNING" : "EVENING");
 
+    // Prepare data for creation
+    const manifestData = {
+      studentId,
+      busId,
+      assistantId,
+      latitude,
+      longitude,
+      status,
+      session: finalSession,
+    };
+
+    // Automatically set boardingTime/alightingTime based on status
+    if (status === "onBoard") {
+      manifestData.boardingTime = now;
+    } else if (status === "offBoard") {
+      manifestData.alightingTime = now;
+    }
+
+    // Create manifest in DB
     const manifest = await prisma.manifest.create({
-      data: {
-        studentId,
-        busId,
-        assistantId,
-        latitude,
-        longitude,
-        status,
-        session: finalSession,
-      },
+      data: manifestData,
       include: { student: true, bus: true, assistant: true },
     });
 
-    // 🔔 Optional: Notify parent if status is onboarding/offboarding
+    // 🔔 Notify parent if status is onboard/offboard
     if (["onBoard", "offBoard"].includes(status)) {
       try {
         await notifyParent(status, manifest.student, manifest.bus?.plateNumber);
@@ -104,23 +115,43 @@ export const createManifest = async (req, res) => {
 };
 
 /**
- * ✅ Update manifest (with SMS trigger)
+ * ✅ Update manifest (auto boardingTime/alightingTime and last location)
  */
 export const updateManifest = async (req, res) => {
   try {
     const { id } = req.params;
-    const data = req.body;
+    const { status, latitude, longitude, ...otherData } = req.body;
 
+    const now = new Date();
+
+    // Prepare data for update
+    const updateData = {
+      ...otherData,
+      latitude,
+      longitude,
+    };
+
+    if (status === "onBoard") {
+      updateData.boardingTime = now;
+    } else if (status === "offBoard") {
+      updateData.alightingTime = now;
+    }
+
+    if (status) {
+      updateData.status = status;
+    }
+
+    // Update manifest
     const updated = await prisma.manifest.update({
       where: { id: Number(id) },
-      data,
+      data: updateData,
       include: { student: true, bus: true },
     });
 
-    // 🔔 Notify parent when status changes to onboard/offboard
-    if (["onBoard", "offBoard"].includes(data.status)) {
+    // Notify parent if status is onboard/offboard
+    if (["onBoard", "offBoard"].includes(status)) {
       try {
-        await notifyParent(data.status, updated.student, updated.bus?.plateNumber);
+        await notifyParent(status, updated.student, updated.bus?.plateNumber);
       } catch (notifyError) {
         console.warn("⚠️ Failed to send SMS notification:", notifyError.message);
       }
