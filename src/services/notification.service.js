@@ -4,18 +4,27 @@ export async function notifyParent({
   parentName,
   parentPhone,
   studentName,
-  eventType,
+  eventType, // expects CHECK_IN or CHECKED_OUT
   busNumber,
   session,
 }) {
   try {
-       const action =
-      eventType === "onBoard"
+    // Map API statuses to SMS-friendly event types
+    const mappedEventType =
+      eventType === "CHECK_IN"
+        ? "onBoard"
+        : eventType === "CHECKED_OUT"
+        ? "offBoard"
+        : "update";
+
+    const action =
+      mappedEventType === "onBoard"
         ? "has boarded"
-        : eventType === "offBoard"
+        : mappedEventType === "offBoard"
         ? "has alighted from"
         : "has updated status on";
-    const message = `Dear ${parentName}, we wish to notify you that your Child ${studentName} has safely ${action} vehicle registration ${busNumber} for the ${session} session. Follow this link to fuata the steps https://trackmykid.vercel.app/.`;
+
+    const message = `Dear ${parentName}, we wish to notify you that your child ${studentName} has safely ${action} vehicle registration ${busNumber} for the ${session} session. Follow this link to track: https://trackmykid.vercel.app/.`;
 
     const result = await sendSms(parentPhone, message);
 
