@@ -113,6 +113,7 @@ router.post("/", async (req, res) => {
         const busNumber = bus?.plateNumber || bus?.id;
         await notifyParent({
           parentPhone,
+          parentName: student.parentName,
           studentName: student.name,
           eventType,
           busNumber,
