@@ -33,12 +33,12 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// ✅ CREATE manifest with morning/evening support
+// ✅ CREATE manifest with morning/evening and SMS support
 router.post("/", async (req, res) => {
   try {
     const { studentId, busId, assistantId, status, latitude, longitude, session } = req.body;
 
-    // Validate student, bus, assistant existence and fetch related parent data
+    // Validate student, bus, assistant existence and fetch parent data
     const student = await prisma.student.findUnique({
       where: { id: studentId },
       include: {
@@ -66,7 +66,7 @@ router.post("/", async (req, res) => {
     const hours = now.getHours();
     const sessionValue = session || (hours < 12 ? "MORNING" : "EVENING");
 
-    // Prevent duplicate check-in/check-out for same student, bus, session, and day
+    // Prevent duplicate check-in/check-out
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date();
@@ -88,7 +88,9 @@ router.post("/", async (req, res) => {
     if (existingManifest) {
       return res.status(400).json({
         success: false,
-        message: `Student has already ${status.toLowerCase()} for this bus in the ${sessionValue.toLowerCase()} session today.`,
+        message: `Student has already ${
+          status === "CHECK_IN" ? "checked in" : "checked out"
+        } for this bus in the ${sessionValue.toLowerCase()} session today.`,
       });
     }
 
@@ -105,22 +107,40 @@ router.post("/", async (req, res) => {
       },
     });
 
-    // 🔔 Send SMS notification
+    // 🔔 Send SMS notification to parent
     try {
       const parentPhone = student?.parent?.user?.phone;
-      const fullParentName = student.parent?.user?.name || "Parent";
-      const firstName = fullParentName.split(" ")[0]; // ✅ Extract first name
+      const fullParentName = student?.parent?.user?.name || "Parent";
+      const firstName = fullParentName.split(" ")[0]; // ✅ Safely extract first name
+
       if (parentPhone) {
-        const eventType = status === "ONBOARD" ? "onBoard" : "offBoard";
+        // Map status from API to eventType for notifyParent
+        const eventType =
+          status === "CHECK_IN"
+            ? "onBoard" // ✅ Parent SMS: "has boarded"
+            : status === "CHECKED_OUT"
+            ? "offBoard" // ✅ Parent SMS: "has alighted from"
+            : "update";
+
         const busNumber = bus?.plateNumber || bus?.id;
-      await notifyParent({
-  parentPhone,
-  parentName: firstName,
-  studentName: student.name,
-  eventType,
-  busNumber,
-  session: sessionValue,
-});
+
+        console.log("ℹ️ Notifying parent with:", {
+          parentPhone,
+          parentName: firstName,
+          studentName: student.name,
+          eventType,
+          busNumber,
+          session: sessionValue,
+        });
+
+        await notifyParent({
+          parentPhone,
+          parentName: firstName,
+          studentName: student.name,
+          eventType,
+          busNumber,
+          session: sessionValue,
+        });
       } else {
         console.warn(`⚠️ Missing parent phone number for student: ${student?.name}`);
       }

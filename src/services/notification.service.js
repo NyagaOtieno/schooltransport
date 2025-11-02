@@ -4,16 +4,29 @@ export async function notifyParent({
   parentName,
   parentPhone,
   studentName,
-  eventType, // expects CHECK_IN or CHECKED_OUT
+  eventType, // expects CHECK_IN / CHECKED_OUT (from manifest route)
   busNumber,
   session,
 }) {
   try {
-    // Map API statuses to SMS-friendly event types
+    console.log("🔔 notifyParent received:", {
+      parentName,
+      parentPhone,
+      studentName,
+      eventType,
+      busNumber,
+      session,
+    });
+
+    // Map manifest API statuses to friendly event types
     const mappedEventType =
       eventType === "CHECK_IN"
         ? "onBoard"
         : eventType === "CHECKED_OUT"
+        ? "offBoard"
+        : eventType === "onBoard" || eventType === "onboard"
+        ? "onBoard"
+        : eventType === "offBoard" || eventType === "offboard"
         ? "offBoard"
         : "update";
 
@@ -22,9 +35,11 @@ export async function notifyParent({
         ? "has boarded"
         : mappedEventType === "offBoard"
         ? "has alighted from"
-        : " Onboarded";
+        : "has updated status on";
 
-    const message = `Dear ${parentName}, we wish to notify you that your child ${studentName} has safely ${action} vehicle registration ${busNumber} for the ${session} session. Follow this link to track: https://trackmykid.vercel.app/.`;
+    const message = `Dear ${parentName}, we wish to notify you that your child ${studentName} ${action} vehicle registration ${busNumber} for the ${session} session. Follow this link to track: https://trackmykid.vercel.app/.`;
+
+    console.log("📩 Composed SMS:", { to: parentPhone, message });
 
     const result = await sendSms(parentPhone, message);
 
@@ -36,7 +51,7 @@ export async function notifyParent({
 
     return result;
   } catch (error) {
-    console.error(`❌ Error in notifyParent:`, error.message);
-    return { success: false, error: error.message };
+    console.error(`❌ Error in notifyParent:`, error);
+    return { success: false, error: error?.message || error };
   }
 }
