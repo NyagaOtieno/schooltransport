@@ -20,7 +20,7 @@ export async function notifyParent({
 
     // Map manifest API statuses to friendly event types
     const mappedEventType =
-      eventType === "CHECK_IN"
+      eventType === "CHECKED_IN"
         ? "onBoard"
         : eventType === "CHECKED_OUT"
         ? "offBoard"
