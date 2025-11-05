@@ -28,12 +28,12 @@ export async function notifyParent({
         ? "onBoard"
         : eventType === "offBoard" || eventType === "offboard"
         ? "offBoard"
-        : "onBoard"; // default now to onBoard
+        : "onBoard"; // ✅ Default now to 'onBoard'
 
     const action =
       mappedEventType === "onBoard"
         ? "has boarded"
-        : "has alighted from"; // Removed "updated status" case
+        : "has alighted from"; // ✅ Unchanged - keeps alighted
 
     const message = `Dear ${parentName}, we wish to notify you that your child ${studentName} ${action} vehicle registration ${busNumber} for the ${session} session. Follow this link to track: https://trackmykid-webapp.vercel.app/`;
 
