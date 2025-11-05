@@ -4,7 +4,7 @@ export async function notifyParent({
   parentName,
   parentPhone,
   studentName,
-  eventType, // expects CHECK_IN / CHECKED_OUT (from manifest route)
+  eventType, // expects CHECKED_IN / CHECKED_OUT (from manifest route)
   busNumber,
   session,
 }) {
@@ -28,16 +28,14 @@ export async function notifyParent({
         ? "onBoard"
         : eventType === "offBoard" || eventType === "offboard"
         ? "offBoard"
-        : "update";
+        : "onBoard"; // default now to onBoard
 
     const action =
       mappedEventType === "onBoard"
         ? "has boarded"
-        : mappedEventType === "offBoard"
-        ? "has alighted from"
-        : "has updated status on";
+        : "has alighted from"; // Removed "updated status" case
 
-    const message = `Dear ${parentName}, we wish to notify you that your child ${studentName} ${action} vehicle registration ${busNumber} for the ${session} session. Follow this link to track: https://trackmykid.vercel.app/.`;
+    const message = `Dear ${parentName}, we wish to notify you that your child ${studentName} ${action} vehicle registration ${busNumber} for the ${session} session. Follow this link to track: https://trackmykid-webapp.vercel.app/`;
 
     console.log("📩 Composed SMS:", { to: parentPhone, message });
 
