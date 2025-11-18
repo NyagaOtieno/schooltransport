@@ -6,7 +6,7 @@ const router = express.Router();
 
 // -----------------------------
 // GET /api/tracking/sync
-// Trigger manual sync from Loc8 API
+// Trigger manual sync from new live location API
 // -----------------------------
 router.get("/sync", async (req, res) => {
   try {

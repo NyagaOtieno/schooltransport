@@ -32,8 +32,8 @@ export async function notifyParent({
 
     const action =
       mappedEventType === "onBoard"
-        ? "has boarded"
-        : "has alighted from"; // ✅ Unchanged - keeps alighted
+        ? "has BOARDED"
+        : "has ALIGHTED from"; // ✅ Unchanged - keeps alighted
 
     const message = `Dear ${parentName}, we wish to notify you that your child ${studentName} ${action} vehicle registration ${busNumber} for the ${session} session. Follow this link to track: https://trackmykid-webapp.vercel.app/`;
 

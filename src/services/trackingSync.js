@@ -1,11 +1,11 @@
 // src/services/trackingSync.js
-import axios from "axios"; // ✅ use axios directly here (not frontend api)
+import axios from "axios";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const LOC8_API_URL = process.env.LOC8_API_URL;
-const LOC8_API_KEY = process.env.LOC8_API_KEY;
+const TRACKING_API_URL = process.env.TRACKING_API_URL;
+const TRACKING_API_KEY = process.env.TRACKING_API_KEY;
 
 // -----------------------------
 // Sync live locations from tracker
@@ -14,11 +14,14 @@ export const syncLiveLocations = async () => {
   console.log("🚀 Starting live location sync...");
 
   try {
-    // ✅ use axios directly — backend should call external APIs itself
-    const { data } = await axios.get(`${LOC8_API_URL}?key=${LOC8_API_KEY}`);
-    const units = data?.data?.units || [];
+    // ✅ Call external tracking API with headers
+    const { data } = await axios.get(TRACKING_API_URL, {
+      headers: { "X-API-Key": TRACKING_API_KEY },
+    });
 
-    if (!Array.isArray(units) || units.length === 0) {
+    const units = Array.isArray(data) ? data : [];
+
+    if (units.length === 0) {
       console.warn("⚠️ No units returned from tracker API.");
       return { success: false, count: 0 };
     }
@@ -28,15 +31,16 @@ export const syncLiveLocations = async () => {
 
     for (const unit of units) {
       try {
-        // Validate coordinates
-        if (typeof unit.lat !== "number" || typeof unit.lng !== "number" || !unit.lat || !unit.lng) {
-          continue;
-        }
+        const lat = parseFloat(unit.last_lat);
+        const lng = parseFloat(unit.last_lng);
+
+        // Skip invalid coordinates
+        if (!lat || !lng) continue;
 
         const lastUpdate = new Date(unit.last_update || now);
 
         // Normalize vehicleReg from tracker
-        const vehicleReg = (unit.number || "Unknown").trim();
+        const vehicleReg = (unit.vehicle_no || "Unknown").trim();
 
         // Link to bus if exists
         const bus = await prisma.bus.findFirst({
@@ -46,11 +50,11 @@ export const syncLiveLocations = async () => {
         const payload = {
           vehicleReg,
           busId: bus?.id ?? null,
-          lat: parseFloat(unit.lat),
-          lng: parseFloat(unit.lng),
+          lat,
+          lng,
           direction: parseFloat(unit.direction || 0),
           speed: parseFloat(unit.speed || 0),
-          movementState: unit.movement_state?.name || "unknown",
+          movementState: unit.movement_state || "unknown",
           lastUpdate,
         };
 
@@ -63,7 +67,7 @@ export const syncLiveLocations = async () => {
 
         updatedCount++;
       } catch (err) {
-        console.error(`❌ Failed to process unit ${unit.number}:`, err.message);
+        console.error(`❌ Failed to process unit ${unit.vehicle_no}:`, err.message);
       }
     }
 
