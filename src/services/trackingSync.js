@@ -19,7 +19,8 @@ export const syncLiveLocations = async () => {
       headers: { "X-API-Key": TRACKING_API_KEY },
     });
 
-    const units = Array.isArray(data) ? data : [];
+    // Ensure we have an array of units
+    const units = Array.isArray(data) ? data : data?.data || [];
 
     if (units.length === 0) {
       console.warn("⚠️ No units returned from tracker API.");
