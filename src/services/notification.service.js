@@ -4,12 +4,12 @@ export async function notifyParent({
   parentName,
   parentPhone,
   studentName,
-  eventType, // expects CHECKED_IN / CHECKED_OUT (from manifest route)
+  eventType,   // CHECKED_IN / CHECKED_OUT / onboard / offboard
   busNumber,
   session,
 }) {
   try {
-    console.log("🔔 notifyParent received:", {
+    console.log("🔔 notifyParent() called with:", {
       parentName,
       parentPhone,
       studentName,
@@ -18,38 +18,70 @@ export async function notifyParent({
       session,
     });
 
-    // Map manifest API statuses to friendly event types
-    const mappedEventType =
-      eventType === "CHECKED_IN"
+    // ---------------- VALIDATION ----------------
+    if (!parentPhone || parentPhone.length < 9) {
+      console.error("❌ Invalid parentPhone:", parentPhone);
+      return { success: false, error: "Invalid phone number" };
+    }
+
+    if (!studentName || !eventType) {
+      console.error("❌ Missing studentName or eventType");
+      return { success: false, error: "Missing event fields" };
+    }
+
+    // Normalize & sanitize phone number
+    let phone = parentPhone.toString().trim();
+
+    if (phone.startsWith("0")) phone = phone.replace(/^0/, "+254");
+    if (phone.startsWith("7")) phone = `+254${phone}`;
+    if (!phone.startsWith("+254")) phone = `+254${phone.slice(-9)}`;
+
+    // ---------------- EVENT TYPE NORMALIZATION ----------------
+    const normalizedEvent = eventType.toString().toLowerCase();
+
+    let mappedEventType =
+      normalizedEvent === "checked_in"
         ? "onBoard"
-        : eventType === "CHECKED_OUT"
+        : normalizedEvent === "checked_out"
         ? "offBoard"
-        : eventType === "onBoard" || eventType === "onboard"
+        : normalizedEvent === "onboard"
         ? "onBoard"
-        : eventType === "offBoard" || eventType === "offboard"
+        : normalizedEvent === "offboard"
         ? "offBoard"
-        : "onBoard"; // ✅ Default now to 'onBoard'
+        : "onBoard"; // DEFAULT = ONBOARD to avoid undefined
 
     const action =
       mappedEventType === "onBoard"
         ? "has BOARDED"
-        : "has ALIGHTED from"; // ✅ Unchanged - keeps alighted
+        : "has ALIGHTED from";
 
+    // ---------------- MESSAGE TEMPLATE ----------------
     const message = `Dear ${parentName}, we wish to notify you that your child ${studentName} ${action} vehicle registration ${busNumber} for the ${session} session. Follow this link to track: https://trackmykid-webapp.vercel.app/`;
 
-    console.log("📩 Composed SMS:", { to: parentPhone, message });
+    console.log("📩 Final SMS payload:", {
+      to: phone,
+      message,
+      mappedEventType,
+    });
 
-    const result = await sendSms(parentPhone, message);
-
-    if (result.success) {
-      console.log(`✅ SMS sent to ${parentPhone}: ${message}`);
-    } else {
-      console.error(`❌ Failed to send SMS to ${parentPhone}:`, result.error);
+    // ---------------- SEND SMS ----------------
+    let result;
+    try {
+      result = await sendSms(phone, message);
+    } catch (smsErr) {
+      console.error("❌ SMS Gateway threw an exception:", smsErr);
+      return { success: false, error: smsErr.message || smsErr };
     }
 
-    return result;
+    if (result?.success) {
+      console.log(`✅ SMS delivered successfully to ${phone}`);
+    } else {
+      console.error("❌ SMS gateway returned error:", result);
+    }
+
+    return result || { success: false, error: "Unknown SMS gateway response" };
   } catch (error) {
-    console.error(`❌ Error in notifyParent:`, error);
-    return { success: false, error: error?.message || error };
+    console.error("❌ notifyParent() crashed:", error);
+    return { success: false, error: error.message || error };
   }
 }
