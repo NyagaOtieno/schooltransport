@@ -49,9 +49,7 @@ export const getManifest = async (req, res) => {
   }
 };
 
-/**
- * ✅ Create manifest (auto morning/evening session, with boardingTime/first location)
- */
+// CREATE manifest
 export const createManifest = async (req, res) => {
   try {
     const {
@@ -92,10 +90,18 @@ export const createManifest = async (req, res) => {
       include: { student: true, bus: true, assistant: true },
     });
 
-    // 🔔 Notify parent if status is onboard/offboard
+    // 🔔 Notify parent if status is onBoard/offBoard
     if (["onBoard", "offBoard"].includes(status)) {
+      const eventType = status === "onBoard" ? "CHECKED_IN" : "CHECKED_OUT";
       try {
-        await notifyParent(status, manifest.student, manifest.bus?.plateNumber);
+        await notifyParent({
+          parentName: manifest.student.parent?.user?.name || "Parent",
+          parentPhone: manifest.student.parent?.user?.phone,
+          studentName: manifest.student.name,
+          eventType,
+          busNumber: manifest.bus?.plateNumber,
+          session: finalSession,
+        });
       } catch (notifyError) {
         console.warn("⚠️ Failed to send SMS notification:", notifyError.message);
       }
@@ -114,9 +120,7 @@ export const createManifest = async (req, res) => {
   }
 };
 
-/**
- * ✅ Update manifest (auto boardingTime/alightingTime and last location)
- */
+// UPDATE manifest
 export const updateManifest = async (req, res) => {
   try {
     const { id } = req.params;
@@ -148,10 +152,18 @@ export const updateManifest = async (req, res) => {
       include: { student: true, bus: true },
     });
 
-    // Notify parent if status is onboard/offboard
+    // Notify parent if status is onBoard/offBoard
     if (["onBoard", "offBoard"].includes(status)) {
+      const eventType = status === "onBoard" ? "CHECKED_IN" : "CHECKED_OUT";
       try {
-        await notifyParent(status, updated.student, updated.bus?.plateNumber);
+        await notifyParent({
+          parentName: updated.student.parent?.user?.name || "Parent",
+          parentPhone: updated.student.parent?.user?.phone,
+          studentName: updated.student.name,
+          eventType,
+          busNumber: updated.bus?.plateNumber,
+          session: updated.session,
+        });
       } catch (notifyError) {
         console.warn("⚠️ Failed to send SMS notification:", notifyError.message);
       }

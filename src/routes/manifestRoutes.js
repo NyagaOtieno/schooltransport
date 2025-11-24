@@ -115,12 +115,15 @@ router.post("/", async (req, res) => {
 
       if (parentPhone) {
         // Map status from API to eventType for notifyParent
-        const eventType =
-          status === "CHECK_IN"
-            ? "onBoard" // ✅ Parent SMS: "has boarded"
-            : status === "CHECKED_OUT"
-            ? "offBoard" // ✅ Parent SMS: "has alighted from"
-            : "update";
+// Map status from API to eventType for notifyParent
+const normalizedStatus = status.toUpperCase();
+
+const eventType =
+  normalizedStatus === "CHECKED_IN"
+    ? "onBoard"   // Parent SMS: "has BOARDED"
+    : normalizedStatus === "CHECKED_OUT"
+    ? "offBoard"  // Parent SMS: "has ALIGHTED from"
+    : "update";
 
         const busNumber = bus?.plateNumber || bus?.id;
 
