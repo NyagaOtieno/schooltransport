@@ -13,10 +13,11 @@ import driverRoutes from "./routes/driverRoutes.js";
 import assistantRoutes from "./routes/assistantRoutes.js";
 import manifestRoutes from "./routes/manifestRoutes.js";
 import trackingRoutes from "./routes/trackingRoutes.js"; // ✅ Added live tracking route
-
+import panicRoutes from "./routes/panicRoutes.js"; // ✅ Added panic routes
 dotenv.config();
 
 const app = express();
+const panicRoutes = require("./routes/panicRoutes")
 
 // -----------------------------
 // Middleware
@@ -46,6 +47,7 @@ app.use("/api/drivers", driverRoutes);
 app.use("/api/assistants", assistantRoutes);
 app.use("/api/manifests", manifestRoutes);
 app.use("/api/tracking", trackingRoutes); // ✅ New tracking route
+app.use("/api/panic", panicRoutes); // ✅ Panic route
 
 // -----------------------------
 // Health check route (for Railway)
