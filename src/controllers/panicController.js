@@ -1,3 +1,4 @@
+// src/controllers/panicController.js
 import { createPanicEvent } from "../services/panic.service.js";
 
 export async function triggerPanic(req, res) {
@@ -10,17 +11,15 @@ export async function triggerPanic(req, res) {
       phoneNumber,
       role: req.user.role,
       ipAddress: req.ip,
-      userAgent: req.headers["user-agent"]
+      userAgent: req.headers["user-agent"],
     });
 
     return res.status(200).json({
       success: true,
-      panicId: panicEvent.id
+      panicId: panicEvent.id,
     });
-
   } catch (error) {
     console.error("PANIC ERROR:", error);
     return res.status(500).json({ success: false });
   }
 }
-

@@ -1,37 +1,34 @@
-import pool from "../config/db.js"; // your PostgreSQL pool
+// src/services/panic.service.js
+import prisma from "../middleware/prisma.js"; // your existing Prisma client
 import { sendEmergencyAlert } from "./notification.service.js";
 
+/**
+ * Create a panic event and send SMS
+ */
 export async function createPanicEvent({
   userId,
   phoneNumber,
   role = "USER",
   ipAddress,
-  userAgent
+  userAgent,
 }) {
-  // 1️⃣ Save panic event to PostgreSQL
-  const query = `
-    INSERT INTO panic_events
-    (user_id, phone_number, role, ip_address, user_agent, status)
-    VALUES ($1, $2, $3, $4, $5, 'PENDING')
-    RETURNING id, created_at
-  `;
+  // 1️⃣ Save panic event to database using Prisma
+  const panicEvent = await prisma.panicEvent.create({
+    data: {
+      userId,
+      phoneNumber,
+      role,
+      ipAddress,
+      userAgent,
+      status: "PENDING",
+    },
+  });
 
-  const values = [
-    userId,
-    phoneNumber,
-    role,
-    ipAddress,
-    userAgent
-  ];
-
-  const { rows } = await pool.query(query, values);
-  const panicEvent = rows[0];
-
-  // 2️⃣ Trigger SMS via existing notification.service
+  // 2️⃣ Trigger SMS via your existing notification service
   await sendEmergencyAlert({
     phoneNumber,
     panicId: panicEvent.id,
-    userId
+    userId,
   });
 
   return panicEvent;
