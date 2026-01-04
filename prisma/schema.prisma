@@ -89,15 +89,12 @@ model User {
   resetOtpExpiresAt  DateTime?
   resetOtpSentAt     DateTime?
 
-}
-
-
+  // Relations
   driverBuses        Bus[]      @relation("DriverBus")
   assistantBuses     Bus[]      @relation("AssistantBus")
   student            Student?   @relation("UserStudent")
   assistantManifests Manifest[] @relation("AssistantManifest")
-
-  panicEvents PanicEvent[] @relation("UserToPanicEvents") // <-- add this line
+  panicEvents        PanicEvent[] @relation("UserToPanicEvents")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -106,6 +103,7 @@ model User {
   @@unique([email, schoolId])
   @@unique([phone, schoolId])
 }
+
 
 model Bus {
   id            Int            @id @default(autoincrement())
@@ -204,4 +202,5 @@ enum PanicStatus {
   PENDING
   ACKNOWLEDGED
   RESOLVED
+  ACTIVE
 }
