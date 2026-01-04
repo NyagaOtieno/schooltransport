@@ -1,12 +1,12 @@
-import { createPanicEvent } from "../services/panic.service.js";
-
+// src/controllers/panicController.js
 export async function triggerPanic(req, res) {
   try {
-    const userId = req.user.id;
-    const phoneNumber = req.user.phone;
+    const userId = req.user.userId; // ✅ change from req.user.id
+    const phoneNumber = req.user.phone || ""; // if phone is optional
     const role = req.user.role;
     const { latitude, longitude, childId } = req.body;
 
+    if (!userId) return res.status(400).json({ error: "userId is required" });
     if (!latitude || !longitude) return res.status(400).json({ error: "Location is required" });
     if (!childId) return res.status(400).json({ error: "childId is required" });
 
@@ -17,7 +17,7 @@ export async function triggerPanic(req, res) {
       latitude,
       longitude,
       childId,
-      createdBy: req.user.name,
+      createdBy: req.user.name || "Unknown",
       ipAddress: req.ip,
       userAgent: req.headers["user-agent"],
     });
