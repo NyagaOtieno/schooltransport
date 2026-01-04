@@ -14,6 +14,7 @@ router.post("/register", async (req, res) => {
   try {
     const { name, email, phone, password, role, schoolId } = req.body;
 
+    // Validation
     if (!name || !email || !password || !role || !schoolId) {
       return res.status(400).json({ error: "All required fields must be provided" });
     }
@@ -22,37 +23,31 @@ router.post("/register", async (req, res) => {
     const existingUser = await prisma.user.findFirst({
       where: {
         schoolId,
-        OR: [
-          { email },
-          { phone }
-        ]
-      }
+        OR: [{ email }, { phone }],
+      },
     });
 
     if (existingUser) {
       return res.status(409).json({
-        error: "Email or phone already exists for this school. You can only update the existing user."
+        error: "Email or phone already exists for this school. You can only update the existing user.",
       });
     }
 
+    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
-      data: {
-        name,
-        email,
-        phone,
-        password: hashedPassword,
-        role,
-        schoolId,
-      },
+      data: { name, email, phone, password: hashedPassword, role, schoolId },
     });
 
     const { password: _, ...userWithoutPassword } = user;
 
-    res.status(201).json({ message: "User registered successfully", user: userWithoutPassword });
+    res.status(201).json({
+      message: "User registered successfully",
+      user: userWithoutPassword,
+    });
   } catch (error) {
-    console.error(error);
+    console.error("REGISTER ERROR:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -64,21 +59,21 @@ router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password)
+    if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required" });
+    }
 
-    // Changed from findUnique to findFirst to support multiple schools
+    // Support multiple schools: findFirst
     const user = await prisma.user.findFirst({ where: { email } });
     if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: "Invalid credentials" });
 
-    const token = jwt.sign(
-      { userId: user.id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    // Generate JWT
+    const token = jwt.sign({ userId: user.id, role: user.role }, process.env.JWT_SECRET, {
+      expiresIn: "7d",
+    });
 
     const { password: _, ...userWithoutPassword } = user;
 
@@ -89,10 +84,19 @@ router.post("/login", async (req, res) => {
       instructions: "Use this token as Bearer token in Postman Authorization header",
     });
   } catch (error) {
-    console.error(error);
+    console.error("LOGIN ERROR:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
+
+// -----------------------------
+// Forgot Password
+// -----------------------------
 router.post("/forgot-password", resetPasswordLimiter, forgotPassword);
+
+// -----------------------------
+// Reset Password
+// -----------------------------
 router.post("/reset-password", resetPasswordLimiter, resetPassword);
+
 export default router;
