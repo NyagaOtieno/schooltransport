@@ -96,13 +96,14 @@ export async function resetPassword(req, res) {
       },
     });
 
+    // ✅ Move the log here, after password is updated
+    console.log(
+      `Password reset successful for userId=${user.id} email=${user.email} at ${new Date().toISOString()}`
+    );
+
     return res.json({ success: true, message: "Password reset successful" });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Server error" });
   }
 }
-console.log(
-  `Password reset successful for userId=${user.id} email=${user.email} at ${new Date().toISOString()}`
-);
-
