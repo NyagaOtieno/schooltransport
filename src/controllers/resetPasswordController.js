@@ -18,7 +18,6 @@ function isStrongPassword(password) {
 export async function forgotPassword(req, res) {
   try {
     const { email } = req.body;
-
     if (!email) return res.status(400).json({ error: "Email is required" });
 
     const user = await prisma.user.findFirst({ where: { email } });
@@ -61,10 +60,11 @@ export async function resetPassword(req, res) {
   try {
     const { email, otp, newPassword } = req.body;
 
-    if (!email || !otp || !newPassword)
+    if (!email || !otp || !newPassword) {
       return res.status(400).json({
         error: "Email, OTP and new password are required",
       });
+    }
 
     if (!isStrongPassword(newPassword)) {
       return res.status(400).json({
@@ -74,7 +74,6 @@ export async function resetPassword(req, res) {
     }
 
     const user = await prisma.user.findFirst({ where: { email } });
-
     if (!user || !user.resetOtp || !user.resetOtpExpiresAt) {
       return res.status(400).json({ error: "Invalid reset request" });
     }
@@ -86,6 +85,7 @@ export async function resetPassword(req, res) {
     const validOtp = await bcrypt.compare(otp, user.resetOtp);
     if (!validOtp) return res.status(400).json({ error: "Invalid OTP" });
 
+    // Update password
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -96,7 +96,7 @@ export async function resetPassword(req, res) {
       },
     });
 
-    // ✅ Move the log here, after password is updated
+    // Log after successful update
     console.log(
       `Password reset successful for userId=${user.id} email=${user.email} at ${new Date().toISOString()}`
     );
