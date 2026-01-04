@@ -2,6 +2,8 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import prisma from "../middleware/prisma.js";
+import { resetPasswordLimiter } from "../middleware/rateLimit.js";
+import { forgotPassword, resetPassword } from "../controllers/resetPasswordController.js";
 
 const router = express.Router();
 
@@ -91,5 +93,6 @@ router.post("/login", async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-
+router.post("/forgot-password", resetPasswordLimiter, forgotPassword);
+router.post("/reset-password", resetPasswordLimiter, resetPassword);
 export default router;

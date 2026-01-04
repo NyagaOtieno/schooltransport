@@ -84,6 +84,14 @@ model User {
 
   parent Parent? @relation("UserToParent")
 
+  // 🔐 Reset password fields
+  resetOtp           String?
+  resetOtpExpiresAt  DateTime?
+  resetOtpSentAt     DateTime?
+
+}
+
+
   driverBuses        Bus[]      @relation("DriverBus")
   assistantBuses     Bus[]      @relation("AssistantBus")
   student            Student?   @relation("UserStudent")
@@ -166,11 +174,12 @@ model PanicEvent {
   role        Role
   ipAddress   String?
   userAgent   String?
-  status      PanicStatus @default(PENDING)
+  status      PanicStatus @default(ACTIVE)
   createdAt   DateTime    @default(now())
+  createdBy   String
 
   user User @relation(fields: [userId], references: [id], name: "UserToPanicEvents") // <-- add relation name
-
+ 
   @@index([userId])
 }
 

@@ -13,16 +13,17 @@ export async function createPanicEvent({
   userAgent,
 }) {
   // 1️⃣ Save panic event to database using Prisma
-  const panicEvent = await prisma.panicEvent.create({
-    data: {
-      userId,
-      phoneNumber,
-      role,
-      ipAddress,
-      userAgent,
-      status: "PENDING",
-    },
-  });
+const panicEvent = await prisma.panicEvent.create({
+  data: {
+    userId,
+    childId,
+    latitude,
+    longitude,
+    createdBy, 
+    status: "ACTIVE",
+  },
+});
+
 
   // 2️⃣ Trigger SMS via your existing notification service
   await sendEmergencyAlert({
@@ -32,4 +33,14 @@ export async function createPanicEvent({
   });
 
   return panicEvent;
+}
+const recentPanic = await prisma.panicEvent.findFirst({
+  where: {
+    userId,
+    createdAt: { gte: new Date(Date.now() - 60 * 1000) }
+  }
+});
+
+if (recentPanic) {
+  throw new Error("Panic cooldown active");
 }
