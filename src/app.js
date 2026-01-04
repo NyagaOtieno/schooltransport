@@ -18,7 +18,8 @@ import panicRoutes from "./routes/panicRoutes.js";
 dotenv.config();
 
 const app = express();
-
+// Trust proxies (important for rate-limit behind Railway/Heroku etc.)
+app.set("trust proxy", true);
 // -----------------------------
 // Middleware
 // -----------------------------
