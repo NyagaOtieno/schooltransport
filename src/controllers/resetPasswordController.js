@@ -14,7 +14,6 @@ function isStrongPassword(password) {
 
 // -----------------------------
 // Send OTP
-// -----------------------------
 export async function forgotPassword(req, res) {
   try {
     const { email } = req.body;
@@ -44,15 +43,22 @@ export async function forgotPassword(req, res) {
       },
     });
 
-    // TEMP: log OTP instead of sending email
-    console.log(`OTP for ${email}: ${otp}`);
+    // Send OTP email
+    try {
+      await sendResetOtpEmail(email, otp);
+      console.log(`OTP sent successfully to ${email}`);
+    } catch (emailErr) {
+      console.error(`Failed to send OTP email to ${email}:`, emailErr);
+      return res.status(500).json({ error: "Failed to send OTP email" });
+    }
 
-    return res.json({ success: true, message: "OTP generated (check server logs)" });
+    return res.json({ success: true, message: "OTP sent to email" });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Server error" });
   }
 }
+
 
 // -----------------------------
 // Verify OTP & Reset Password
