@@ -83,9 +83,9 @@ async function main() {
   console.log("🧑‍💼 Creating admin user...");
   await createUser({
     name: "System Admin",
-    email: "admin@schooltrack.com",
+    email: "nyagaotieno@gmail.com",
     phone: "0700009999",
-    password: "admin123",
+    password: "Admin@1234",
     role: Role.ADMIN,
     schoolId: school.id,
   });
@@ -105,7 +105,7 @@ async function main() {
       name: driverNames[i],
       email: `${driverNames[i].split(" ")[0].toLowerCase()}.driver@example.com`,
       phone: `07110000${i + 1}`,
-      password: "driver123",
+      password: "driver@1234",
       role: Role.DRIVER,
       schoolId: school.id,
     }));
@@ -114,7 +114,7 @@ async function main() {
       name: assistantNames[i],
       email: `${assistantNames[i].split(" ")[0].toLowerCase()}.assistant@example.com`,
       phone: `07220000${i + 1}`,
-      password: "assistant123",
+      password: "Assistant@1234",
       role: Role.ASSISTANT,
       schoolId: school.id,
     }));
@@ -136,7 +136,7 @@ async function main() {
       name: parentNames[i],
       email: parentEmail,
       phone: parentPhone,
-      password: "parent123",
+      password: "Parent@1234",
       role: Role.PARENT,
       schoolId: school.id,
     });
@@ -172,8 +172,8 @@ async function main() {
   // Create Buses
 console.log("🚌 Creating buses...");
 const busData = [
-  { name: "Morning Express", plate: "API Test", route: "Route A - City to School" },
-  { name: "Sunrise Shuttle", plate: "KBB456Y", route: "Route B - Westlands to School" },
+  { name: "Morning Express", plate: "KBM448Y", route: "Route A - City to School" },
+  { name: "Sunrise Shuttle", plate: "KBU980Y", route: "Route B - Kasarani to School" },
   { name: "Evening Cruiser", plate: "KCC789Z", route: "Route C - South B to School" },
   { name: "Highway Comet", plate: "KDD101A", route: "Route D - Embakasi to School" },
 ];

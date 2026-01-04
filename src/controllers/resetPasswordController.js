@@ -44,9 +44,10 @@ export async function forgotPassword(req, res) {
       },
     });
 
-    await sendResetOtpEmail(email, otp);
+    // TEMP: log OTP instead of sending email
+    console.log(`OTP for ${email}: ${otp}`);
 
-    return res.json({ success: true, message: "OTP sent to email" });
+    return res.json({ success: true, message: "OTP generated (check server logs)" });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Server error" });

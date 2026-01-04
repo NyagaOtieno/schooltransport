@@ -199,8 +199,9 @@ enum ManifestSession {
 }
 
 enum PanicStatus {
+  ACTIVE
   PENDING
   ACKNOWLEDGED
   RESOLVED
-  ACTIVE
+  
 }
