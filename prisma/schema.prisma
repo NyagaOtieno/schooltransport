@@ -143,6 +143,7 @@ model Student {
   school    School     @relation(fields: [schoolId], references: [id])
   user      User?      @relation("UserStudent", fields: [userId], references: [id])
   manifests Manifest[]
+  panicEvents PanicEvent[]
 }
 
 model Manifest {
@@ -168,18 +169,25 @@ model Manifest {
 model PanicEvent {
   id          Int         @id @default(autoincrement())
   userId      Int
+  childId     Int
+  latitude    Float
+  longitude   Float
   phoneNumber String?
   role        Role
   ipAddress   String?
   userAgent   String?
-  status      PanicStatus @default(ACTIVE)
+  status      PanicStatus 
   createdAt   DateTime    @default(now())
   createdBy   String
 
-  user User @relation(fields: [userId], references: [id], name: "UserToPanicEvents") // <-- add relation name
- 
+  user  User    @relation(fields: [userId], references: [id], name: "UserToPanicEvents")
+  child Student @relation(fields: [childId], references: [id])
+
   @@index([userId])
+  @@index([childId])
 }
+
+
 
 enum Role {
   ADMIN
