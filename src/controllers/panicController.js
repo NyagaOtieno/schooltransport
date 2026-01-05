@@ -1,28 +1,36 @@
 // src/controllers/panicController.js
+import { createPanicEvent } from "../services/panic.service.js";
+
 export async function triggerPanic(req, res) {
   try {
-    const userId = req.user.userId; // ✅ change from req.user.id
-    const phoneNumber = req.user.phone || ""; // if phone is optional
-    const role = req.user.role;
+    const { id, phone, role, name } = req.user || {};
     const { latitude, longitude, childId } = req.body;
 
-    if (!userId) return res.status(400).json({ error: "userId is required" });
-    if (!latitude || !longitude) return res.status(400).json({ error: "Location is required" });
-    if (!childId) return res.status(400).json({ error: "childId is required" });
+    if (!id) {
+      return res.status(401).json({ error: "Unauthorized user" });
+    }
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({ error: "Location is required" });
+    }
+
+    if (!childId) {
+      return res.status(400).json({ error: "childId is required" });
+    }
 
     const panicEvent = await createPanicEvent({
-      userId,
-      phoneNumber,
+      userId: id,               // ✅ FIXED
+      phoneNumber: phone || "",
       role,
       latitude,
       longitude,
       childId,
-      createdBy: req.user.name || "Unknown",
-      ipAddress: req.ip,
-      userAgent: req.headers["user-agent"],
+      createdBy: name || "Unknown",
+      ipAddress: req.ip || null,
+      userAgent: req.headers["user-agent"] || null,
     });
 
-    return res.status(200).json({
+    return res.status(201).json({
       success: true,
       panicId: panicEvent.id,
       status: panicEvent.status,
@@ -30,12 +38,19 @@ export async function triggerPanic(req, res) {
       cooldown: 60,
     });
   } catch (error) {
-    console.error("PANIC ERROR:", error);
+    console.error("PANIC ERROR:", error.message);
 
-    if (error.message?.includes("cooldown")) {
-      return res.status(429).json({ success: false, error: error.message });
+    // Handle known business errors cleanly
+    if (error.message === "Panic cooldown active") {
+      return res.status(429).json({
+        success: false,
+        error: "Panic already triggered recently. Please wait.",
+      });
     }
 
-    return res.status(500).json({ success: false });
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
   }
 }
