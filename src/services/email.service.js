@@ -2,32 +2,17 @@ import nodemailer from 'nodemailer';
 
 const transporter = nodemailer.createTransport({
   host: 'mail.trackmykid.co.ke',
-  port: 465,
-  secure: true, // REQUIRED for 465
+  port: 587,
+  secure: false, // use STARTTLS
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
   tls: {
-    rejectUnauthorized: false, // needed for many shared hosts
+    rejectUnauthorized: false,
   },
-  connectionTimeout: 15000,
-  greetingTimeout: 15000,
 });
 
-// ✅ Verify SMTP once on startup
-transporter.verify((error) => {
-  if (error) {
-    console.error('❌ SMTP connection failed:', error.message);
-  } else {
-    console.log('✅ SMTP server is ready to send emails');
-  }
-});
-
-/**
- * Send password reset OTP email
- * Retries ONCE after 5 seconds if it fails
- */
 export async function sendResetOtpEmail(email, otp, retry = true) {
   try {
     const info = await transporter.sendMail({
