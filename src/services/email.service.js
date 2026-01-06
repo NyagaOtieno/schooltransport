@@ -1,62 +1,41 @@
-import nodemailer from "nodemailer";
+import nodemailer from 'nodemailer';
 
-// Create a reusable transporter
 const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true, // SSL required for port 465
+  host: process.env.EMAIL_HOST,
+  port: parseInt(process.env.EMAIL_PORT, 10),
+  secure: process.env.EMAIL_SECURE === 'true',
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, // Gmail App Password
+    pass: process.env.EMAIL_PASS,
   },
-  tls: { rejectUnauthorized: false },
-  connectionTimeout: 15000,
-  greetingTimeout: 15000,
+  tls: {
+    rejectUnauthorized: false,
+  },
 });
 
-// ✅ Verify SMTP on startup
+// verify on startup
 transporter.verify((err) => {
-  if (err) {
-    console.error("❌ SMTP connection failed:", err.message);
-  } else {
-    console.log("✅ Gmail SMTP ready to send emails");
-  }
+  if (err) console.error('❌ SMTP connection failed:', err.message);
+  else console.log('✅ SMTP server is ready to send emails');
 });
 
-/**
- * Send a password reset OTP email
- * Retries once after 5 seconds if failed
- */
 export async function sendResetOtpEmail(email, otp, retry = true) {
   try {
     const info = await transporter.sendMail({
       from: `"TrackMyKid" <${process.env.EMAIL_USER}>`,
       to: email,
-      subject: "Reset Your Password",
-      html: `
-        <div style="font-family: Arial, sans-serif;">
-          <h3>Password Reset</h3>
-          <p>Your OTP is:</p>
-          <h2 style="letter-spacing: 2px;">${otp}</h2>
-          <p>This OTP expires in <strong>10 minutes</strong>.</p>
-          <p>If you did not request this, ignore this email.</p>
-        </div>
-      `,
+      subject: 'Reset Your Password',
+      html: `<h3>OTP: ${otp}</h3>`,
     });
-
-    console.log(`✅ OTP sent to ${email}, messageId: ${info.messageId}`);
+    console.log(`✅ OTP email sent to ${email}`, info.messageId);
     return true;
-
-  } catch (error) {
-    console.error(`❌ Email send failed for ${email}:`, error.message);
-
-    // 🔁 Retry ONCE after 5 seconds
+  } catch (err) {
+    console.error(`❌ Email send failed for ${email}:`, err.message);
     if (retry) {
-      console.log("🔁 Retrying in 5 seconds...");
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      console.log('🔁 Retrying in 5 seconds...');
+      await new Promise(r => setTimeout(r, 5000));
       return sendResetOtpEmail(email, otp, false);
     }
-
     return false;
   }
 }
