@@ -1,17 +1,17 @@
-const nodemailer = require('nodemailer');
+import nodemailer from 'nodemailer';
 
 const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,       // e.g., smtp.gmail.com
-  port: 587,                          // Use 587 for TLS
-  secure: false,                       // Must be false for 587
+  host: 'mail.trackmykid.co.ke',
+  port: 465,
+  secure: true,
   auth: {
-    user: process.env.EMAIL_USER,     // Your email
-    pass: process.env.EMAIL_PASS,     // Your password or App Password for Gmail
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
   tls: {
-    ciphers: 'TLSv1.2',               // Optional: enforce TLS version
+    rejectUnauthorized: false,
   },
-  connectionTimeout: 30000,            // Optional: 10s timeout
+  connectionTimeout: 15000,
 });
 
 
