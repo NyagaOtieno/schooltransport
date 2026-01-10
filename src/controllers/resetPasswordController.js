@@ -16,17 +16,20 @@ function isStrongPassword(password) {
 // Send OTP via SMS
 export async function forgotPassword(req, res) {
   try {
-    const { phone } = req.body; // Only phone is required
-    if (!phone) return res.status(400).json({ error: "Phone number is required" });
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ error: "Phone is required" });
 
+    // Find user by phone
     const user = await prisma.user.findFirst({ where: { phone } });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    // OTP cooldown: 60 seconds
+    // OTP resend cooldown
     if (user.resetOtpSentAt) {
       const diff = Date.now() - new Date(user.resetOtpSentAt).getTime();
       if (diff < 60 * 1000) {
-        return res.status(429).json({ error: "Please wait before requesting another OTP" });
+        return res.status(429).json({
+          error: "Please wait before requesting another OTP",
+        });
       }
     }
 
@@ -35,19 +38,15 @@ export async function forgotPassword(req, res) {
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        resetOtp: await bcrypt.hash(otp, 10),
+        resetOtp: otp, // you can hash it if needed
         resetOtpExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
         resetOtpSentAt: new Date(),
       },
     });
 
-    const result = await sendOtpSms({
-      phone: user.phone,
-      userName: user.name,
-      otp,
-    });
-
-    if (!result.success) return res.status(500).json({ error: "Failed to send OTP SMS" });
+    // Send OTP via SMS
+    const { sendSms } = await import("../utils/smsGateway.js");
+    await sendSms(phone, `Your OTP for password reset is: ${otp}`);
 
     return res.json({ success: true, message: "OTP sent via SMS" });
   } catch (err) {
@@ -57,22 +56,14 @@ export async function forgotPassword(req, res) {
 }
 
 
+
 // -----------------------------
 // Verify OTP & Reset Password
 export async function resetPassword(req, res) {
   try {
     const { phone, otp, newPassword } = req.body;
-
     if (!phone || !otp || !newPassword) {
-      return res.status(400).json({
-        error: "Phone, OTP, and new password are required",
-      });
-    }
-
-    if (!isStrongPassword(newPassword)) {
-      return res.status(400).json({
-        error: "Password must be at least 8 characters and include uppercase, lowercase, and a number",
-      });
+      return res.status(400).json({ error: "Phone, OTP and new password are required" });
     }
 
     const user = await prisma.user.findFirst({ where: { phone } });
@@ -84,17 +75,11 @@ export async function resetPassword(req, res) {
       return res.status(400).json({ error: "OTP expired" });
     }
 
-    const validOtp = await bcrypt.compare(otp, user.resetOtp);
-    if (!validOtp) return res.status(400).json({ error: "Invalid OTP" });
+    if (user.resetOtp !== otp) return res.status(400).json({ error: "Invalid OTP" });
 
     await prisma.user.update({
       where: { id: user.id },
-      data: {
-        password: await bcrypt.hash(newPassword, 10),
-        resetOtp: null,
-        resetOtpExpiresAt: null,
-        resetOtpSentAt: null,
-      },
+      data: { password: await bcrypt.hash(newPassword, 10), resetOtp: null, resetOtpExpiresAt: null, resetOtpSentAt: null },
     });
 
     return res.json({ success: true, message: "Password reset successful" });
