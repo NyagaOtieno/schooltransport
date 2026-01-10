@@ -1,107 +1,121 @@
-// src/services/notification.service.js
-import { sendSms } from "../utils/smsGateway.js";
+// src/controllers/resetPassword.controller.js
+import prisma from "../middleware/prisma.js";
+import bcrypt from "bcryptjs";
+import { sendOtpSms } from "../services/notification.service.js";
 
-/**
- * Existing notifyParent function
- */
-export async function notifyParent({
-  parentName,
-  parentPhone,
-  studentName,
-  eventType,
-  busNumber,
-  session,
-}) {
+// Password strength checker
+function isStrongPassword(password) {
+  return (
+    password.length >= 8 &&
+    /[A-Z]/.test(password) &&
+    /[a-z]/.test(password) &&
+    /[0-9]/.test(password)
+  );
+}
+
+// -----------------------------
+// Send OTP via SMS
+export async function forgotPassword(req, res) {
   try {
-    console.log("🔔 notifyParent() called with:", {
-      parentName,
-      parentPhone,
-      studentName,
-      eventType,
-      busNumber,
-      session,
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ error: "Phone number is required" });
+
+    // Find user by phone
+    const user = await prisma.user.findFirst({ where: { phone } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // OTP resend cooldown: 60 seconds
+    if (user.resetOtpSentAt) {
+      const diff = Date.now() - new Date(user.resetOtpSentAt).getTime();
+      if (diff < 60 * 1000) {
+        return res.status(429).json({
+          error: "Please wait before requesting another OTP",
+        });
+      }
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Save OTP hash and expiry in DB
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetOtp: await bcrypt.hash(otp, 10),
+        resetOtpExpiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+        resetOtpSentAt: new Date(),
+      },
     });
 
-    if (!parentPhone || parentPhone.length < 9) {
-      console.error("❌ Invalid parentPhone:", parentPhone);
-      return { success: false, error: "Invalid phone number" };
-    }
-    if (!studentName || !eventType) {
-      console.error("❌ Missing studentName or eventType");
-      return { success: false, error: "Missing event fields" };
-    }
+    // Send OTP via SMS
+    const result = await sendOtpSms({
+      phone: user.phone,
+      userName: user.name,
+      otp,
+    });
 
-    // Normalize & sanitize phone number
-    let phone = parentPhone.toString().trim();
-    if (phone.startsWith("0")) phone = phone.replace(/^0/, "+254");
-    if (phone.startsWith("7")) phone = `+254${phone}`;
-    if (!phone.startsWith("+254")) phone = `+254${phone.slice(-9)}`;
-
-    const normalizedEvent = eventType.toString().toLowerCase();
-    let mappedEventType =
-      normalizedEvent === "checked_in"
-        ? "onBoard"
-        : normalizedEvent === "checked_out"
-        ? "offBoard"
-        : normalizedEvent === "onboard"
-        ? "onBoard"
-        : normalizedEvent === "offboard"
-        ? "offBoard"
-        : "onBoard";
-
-    const action =
-      mappedEventType === "onBoard" ? "has BOARDED" : "has ALIGHTED from";
-
-    const message = `Dear ${parentName}, we wish to notify you that your child ${studentName} ${action} vehicle registration ${busNumber} for the ${session} session. Follow this link to track: https://trackmykid-webapp.vercel.app/`;
-
-    console.log("📩 Final SMS payload:", { to: phone, message, mappedEventType });
-
-    let result;
-    try {
-      result = await sendSms(phone, message);
-    } catch (smsErr) {
-      console.error("❌ SMS Gateway threw an exception:", smsErr);
-      return { success: false, error: smsErr.message || smsErr };
+    if (!result.success) {
+      console.error("❌ OTP SMS failed:", result);
+      return res.status(500).json({ error: "Failed to send OTP SMS" });
     }
 
-    if (result?.success) console.log(`✅ SMS delivered successfully to ${phone}`);
-    else console.error("❌ SMS gateway returned error:", result);
-
-    return result || { success: false, error: "Unknown SMS gateway response" };
-  } catch (error) {
-    console.error("❌ notifyParent() crashed:", error);
-    return { success: false, error: error.message || error };
+    console.log(`✅ OTP sent successfully to ${user.phone}`);
+    return res.json({ success: true, message: "OTP sent via SMS" });
+  } catch (err) {
+    console.error("❌ forgotPassword() crashed:", err);
+    return res.status(500).json({ error: "Server error" });
   }
 }
 
-/**
- * New function: sendEmergencyAlert for panic events
- */
-export async function sendEmergencyAlert({ phoneNumber, panicId, userId }) {
+// -----------------------------
+// Verify OTP & Reset Password
+export async function resetPassword(req, res) {
   try {
-    if (!phoneNumber || phoneNumber.length < 9) {
-      console.error("❌ Invalid phoneNumber for panic:", phoneNumber);
-      return { success: false, error: "Invalid phone number" };
+    const { phone, otp, newPassword } = req.body;
+
+    if (!phone || !otp || !newPassword) {
+      return res.status(400).json({
+        error: "Phone, OTP and new password are required",
+      });
     }
 
-    // Normalize phone number
-    let phone = phoneNumber.toString().trim();
-    if (phone.startsWith("0")) phone = phone.replace(/^0/, "+254");
-    if (phone.startsWith("7")) phone = `+254${phone}`;
-    if (!phone.startsWith("+254")) phone = `+254${phone.slice(-9)}`;
+    if (!isStrongPassword(newPassword)) {
+      return res.status(400).json({
+        error:
+          "Password must be at least 8 characters and include uppercase, lowercase, and a number",
+      });
+    }
 
-    const message = `⚠️ Emergency alert! User ID: ${userId} triggered a panic event (ID: ${panicId}). Check immediately!`;
+    const user = await prisma.user.findFirst({ where: { phone } });
+    if (!user || !user.resetOtp || !user.resetOtpExpiresAt) {
+      return res.status(400).json({ error: "Invalid reset request" });
+    }
 
-    console.log("📩 Panic SMS payload:", { to: phone, message });
+    if (user.resetOtpExpiresAt < new Date()) {
+      return res.status(400).json({ error: "OTP expired" });
+    }
 
-    const result = await sendSms(phone, message);
+    const validOtp = await bcrypt.compare(otp, user.resetOtp);
+    if (!validOtp) return res.status(400).json({ error: "Invalid OTP" });
 
-    if (result?.success) console.log(`✅ Panic SMS delivered successfully to ${phone}`);
-    else console.error("❌ Panic SMS failed:", result);
+    // Update password and clear OTP fields
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: await bcrypt.hash(newPassword, 10),
+        resetOtp: null,
+        resetOtpExpiresAt: null,
+        resetOtpSentAt: null,
+      },
+    });
 
-    return result || { success: false, error: "Unknown SMS gateway response" };
-  } catch (error) {
-    console.error("❌ sendEmergencyAlert() crashed:", error);
-    return { success: false, error: error.message || error };
+    console.log(
+      `✅ Password reset successful for userId=${user.id} phone=${user.phone} at ${new Date().toISOString()}`
+    );
+
+    return res.json({ success: true, message: "Password reset successful" });
+  } catch (err) {
+    console.error("❌ resetPassword() crashed:", err);
+    return res.status(500).json({ error: "Server error" });
   }
 }
