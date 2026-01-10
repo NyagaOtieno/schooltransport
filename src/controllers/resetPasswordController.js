@@ -1,7 +1,9 @@
+// src/controllers/resetPassword.controller.js
 import prisma from "../middleware/prisma.js";
 import bcrypt from "bcryptjs";
-import { sendSms } from "../utils/smsGateway.js"; // your existing SMS sender
+import { sendOtpSms } from "../services/notification.service.js";
 
+// -----------------------------
 // Password strength checker
 function isStrongPassword(password) {
   return (
@@ -17,45 +19,47 @@ function isStrongPassword(password) {
 export async function forgotPassword(req, res) {
   try {
     const { phone } = req.body;
-    if (!phone) return res.status(400).json({ error: "Phone is required" });
+    if (!phone) return res.status(400).json({ error: "Phone number is required" });
 
-    // Find user by phone
     const user = await prisma.user.findFirst({ where: { phone } });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    // OTP resend cooldown
+    // Cooldown: 60 seconds
     if (user.resetOtpSentAt) {
       const diff = Date.now() - new Date(user.resetOtpSentAt).getTime();
       if (diff < 60 * 1000) {
-        return res.status(429).json({
-          error: "Please wait before requesting another OTP",
-        });
+        return res.status(429).json({ error: "Please wait before requesting another OTP" });
       }
     }
 
+    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
+    // Save hashed OTP and expiry
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        resetOtp: otp, // you can hash it if needed
-        resetOtpExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        resetOtp: await bcrypt.hash(otp, 10),
+        resetOtpExpiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
         resetOtpSentAt: new Date(),
       },
     });
 
     // Send OTP via SMS
-    const { sendSms } = await import("../utils/smsGateway.js");
-    await sendSms(phone, `Your OTP for password reset is: ${otp}`);
+    const result = await sendOtpSms({ phone: user.phone, userName: user.name, otp });
 
+    if (!result.success) {
+      console.error("❌ OTP SMS failed:", result);
+      return res.status(500).json({ error: "Failed to send OTP SMS" });
+    }
+
+    console.log(`✅ OTP sent successfully to ${user.phone}`);
     return res.json({ success: true, message: "OTP sent via SMS" });
   } catch (err) {
-    console.error(err);
+    console.error("❌ forgotPassword() crashed:", err);
     return res.status(500).json({ error: "Server error" });
   }
 }
-
-
 
 // -----------------------------
 // Verify OTP & Reset Password
@@ -64,6 +68,12 @@ export async function resetPassword(req, res) {
     const { phone, otp, newPassword } = req.body;
     if (!phone || !otp || !newPassword) {
       return res.status(400).json({ error: "Phone, OTP and new password are required" });
+    }
+
+    if (!isStrongPassword(newPassword)) {
+      return res.status(400).json({
+        error: "Password must be at least 8 characters and include uppercase, lowercase, and a number",
+      });
     }
 
     const user = await prisma.user.findFirst({ where: { phone } });
@@ -75,16 +85,24 @@ export async function resetPassword(req, res) {
       return res.status(400).json({ error: "OTP expired" });
     }
 
-    if (user.resetOtp !== otp) return res.status(400).json({ error: "Invalid OTP" });
+    const validOtp = await bcrypt.compare(otp, user.resetOtp);
+    if (!validOtp) return res.status(400).json({ error: "Invalid OTP" });
 
+    // Update password & clear OTP
     await prisma.user.update({
       where: { id: user.id },
-      data: { password: await bcrypt.hash(newPassword, 10), resetOtp: null, resetOtpExpiresAt: null, resetOtpSentAt: null },
+      data: {
+        password: await bcrypt.hash(newPassword, 10),
+        resetOtp: null,
+        resetOtpExpiresAt: null,
+        resetOtpSentAt: null,
+      },
     });
 
+    console.log(`✅ Password reset successful for userId=${user.id} phone=${user.phone}`);
     return res.json({ success: true, message: "Password reset successful" });
   } catch (err) {
-    console.error(err);
+    console.error("❌ resetPassword() crashed:", err);
     return res.status(500).json({ error: "Server error" });
   }
 }
