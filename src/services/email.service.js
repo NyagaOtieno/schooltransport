@@ -9,7 +9,7 @@ export async function sendResetOtpEmail(email, otp) {
   await apiInstance.sendTransacEmail({
     sender: {
       name: "TrackMyKid",
-      email: "yourgmail@gmail.com",
+      email: "yourgmail@gmail.com", // must be verified
     },
     to: [{ email }],
     subject: "Reset Password OTP",
