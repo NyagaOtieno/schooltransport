@@ -13,13 +13,14 @@ build/
 .env.test.local
 .env.production.local
 .env.*
+
+# Prisma local dev DB
 prisma/dev.db
 
-
 # Logs
-logs
+logs/
 *.log
-pids
+pids/
 *.pid
 *.seed
 *.pid.lock
