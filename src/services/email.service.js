@@ -5,11 +5,11 @@ client.authentications["api-key"].apiKey = process.env.BREVO_API_KEY;
 
 const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
 
-export async function sendResetOtpEmail(email: string, otp: string) {
+export async function sendResetOtpEmail(email, otp) {
   await apiInstance.sendTransacEmail({
     sender: {
       name: "TrackMyKid",
-      email: "yourgmail@gmail.com",
+      email: "yourgmail@gmail.com", // must be verified in Brevo
     },
     to: [{ email }],
     subject: "Reset Password OTP",
