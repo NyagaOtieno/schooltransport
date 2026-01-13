@@ -91,3 +91,44 @@ export async function sendOtpSms({ phone, otp, purpose = "password reset" }) {
     return { success: false, error: err.message || err };
   }
 }
+/**
+ * 🚨 Send Emergency / Panic Alert
+ */
+export async function sendEmergencyAlert({
+  phone,
+  name = "User",
+  location = "Unknown location",
+}) {
+  try {
+    if (!phone) {
+      return { success: false, error: "Phone number is required" };
+    }
+
+    // Normalize phone
+    let normalizedPhone = phone.toString().trim();
+    if (normalizedPhone.startsWith("0"))
+      normalizedPhone = normalizedPhone.replace(/^0/, "+254");
+    if (normalizedPhone.startsWith("7"))
+      normalizedPhone = `+254${normalizedPhone}`;
+    if (!normalizedPhone.startsWith("+254"))
+      normalizedPhone = `+254${normalizedPhone.slice(-9)}`;
+
+    const message = `🚨 EMERGENCY ALERT 🚨
+${name} has triggered a panic alert.
+Location: ${location}
+Please respond immediately.`;
+
+    const result = await sendSms(normalizedPhone, message);
+
+    if (!result?.success) {
+      console.error("❌ Emergency SMS failed:", result);
+      return { success: false, error: result?.error || "SMS failed" };
+    }
+
+    console.log(`🚨 Emergency alert sent to ${normalizedPhone}`);
+    return { success: true };
+  } catch (err) {
+    console.error("❌ sendEmergencyAlert error:", err);
+    return { success: false, error: err.message || err };
+  }
+}
