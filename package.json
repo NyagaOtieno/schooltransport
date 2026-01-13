@@ -21,7 +21,6 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
-    "@types/node": "^25.0.5",
     "axios": "^1.13.2",
     "bcryptjs": "^2.4.3",
     "body-parser": "^1.20.3",
@@ -36,9 +35,12 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/node": "^25.0.7",
     "@types/xlsx": "^0.0.35",
     "nodemon": "^3.0.1",
-    "prisma": "^5.22.0"
+    "prisma": "^5.22.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   },
   "repository": {
     "type": "git",
