@@ -1,26 +1,28 @@
 import { notifyParent } from "../services/notification.service.js";
 
 /**
- * Send notification controller
+ * REQUIRED EXPORT — DO NOT RENAME
  */
-export async function sendNotification(req, res) {
+export default async function sendNotification(req, res) {
   try {
     const {
-      parentName,
+      parentName = "Parent",
       parentPhone,
       studentName,
       eventType,
-      busNumber,
-      session,
+      busNumber = null,
+      session = null,
     } = req.body;
 
+    // Validate required fields
     if (!parentPhone || !studentName || !eventType) {
       return res.status(400).json({
         success: false,
-        error: "Missing required fields",
+        error: "parentPhone, studentName, and eventType are required",
       });
     }
 
+    // Send notification
     const result = await notifyParent({
       parentName,
       parentPhone,
@@ -34,7 +36,7 @@ export async function sendNotification(req, res) {
       return res.status(500).json(result);
     }
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       message: "Notification sent successfully",
     });
