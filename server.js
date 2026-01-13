@@ -17,6 +17,7 @@ import prisma from "./src/middleware/prisma.js";
 import smsRoutes from "./src/routes/sms.routes.js";
 import notificationRoutes from "./src/routes/notification.routes.js";
 import manifestRoutes from "./src/routes/manifestRoutes.js";
+import cors from "cors";
 
 const PORT = process.env.PORT || 5000;
 
@@ -27,6 +28,12 @@ app.use("/api/sms", smsRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/manifests", manifestRoutes);
 
+
+app.use(cors({
+  origin: "https://trackmykid-webapp.vercel.app", // your frontend URL
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  credentials: true,
+}));
 // -----------------------------
 // Middleware: Log all incoming requests
 // -----------------------------
