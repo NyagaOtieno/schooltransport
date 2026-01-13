@@ -4,7 +4,6 @@ const client = SibApiV3Sdk.ApiClient.instance;
 client.authentications["api-key"].apiKey = process.env.BREVO_API_KEY;
 
 const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-
 export async function sendResetOtpEmail(email, otp) {
   await apiInstance.sendTransacEmail({
     sender: {
