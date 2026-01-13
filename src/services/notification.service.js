@@ -1,60 +1,56 @@
-// src/controllers/notification.controller.js
-import { notifyParent } from "../services/notification.service.js";
+// src/services/notification.service.js
+import { sendSms } from "../utils/smsGateway.js";
 
 /**
- * Send notification to a parent about a student's status on the bus
- * Expects body:
- * {
- *   "status": "checked_in" | "checked_out",
- *   "student": {
- *     "name": "John Doe",
- *     "parentName": "Jane Doe",
- *     "parentPhone": "0722301062"
- *   },
- *   "busNumber": "KBY 123X",
- *   "session": "Morning"
- * }
+ * Notify a parent about a student's bus event
  */
-export async function sendNotification(req, res) {
+export async function notifyParent({
+  parentName,
+  parentPhone,
+  studentName,
+  eventType,
+  busNumber,
+  session,
+}) {
   try {
-    const { status, student, busNumber, session } = req.body;
-
-    // Validate request body
-    if (!status || !student || !student.name || !student.parentName || !student.parentPhone || !busNumber) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required fields: status, student (with name, parentName, parentPhone), busNumber",
-      });
+    if (!parentPhone || parentPhone.length < 9) {
+      return { success: false, error: "Invalid phone number" };
     }
 
-    // Send notification
-    const result = await notifyParent({
-      parentName: student.parentName,
-      parentPhone: student.parentPhone,
-      studentName: student.name,
-      eventType: status,
-      busNumber,
-      session: session || "N/A", // default if session is not provided
-    });
+    // Normalize phone number
+    let phone = parentPhone.toString().trim();
+    if (phone.startsWith("0")) phone = phone.replace(/^0/, "+254");
+    if (phone.startsWith("7")) phone = `+254${phone}`;
+    if (!phone.startsWith("+254")) phone = `+254${phone.slice(-9)}`;
 
-    if (!result.success) {
-      return res.status(500).json({
-        success: false,
-        message: "Failed to send notification",
-        error: result.error || "Unknown error from SMS gateway",
-      });
+    const normalizedEvent = eventType.toString().toLowerCase();
+    const mappedEventType =
+      normalizedEvent === "checked_in" || normalizedEvent === "onboard"
+        ? "onBoard"
+        : normalizedEvent === "checked_out" || normalizedEvent === "offboard"
+        ? "offBoard"
+        : "onBoard";
+
+    const action = mappedEventType === "onBoard" ? "has BOARDED" : "has ALIGHTED from";
+
+    const message = `Dear ${parentName}, your child ${studentName} ${action} vehicle ${busNumber} for the ${session || "N/A"} session. Track here: https://trackmykid-webapp.vercel.app/`;
+
+    const result = await sendSms(phone, message);
+
+    if (!result?.success) {
+      console.error("❌ SMS failed:", result);
+      return { success: false, error: result?.error || "SMS failed" };
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Notification sent successfully",
-    });
-  } catch (error) {
-    console.error("❌ Error sending notification:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to send notification",
-      error: error.message,
-    });
+    console.log(`✅ SMS sent to ${phone}`);
+    return { success: true };
+  } catch (err) {
+    console.error("❌ notifyParent error:", err);
+    return { success: false, error: err.message || err };
   }
 }
+
+/**
+ * Optional: you can also export other functions from this file
+ */
+// export async function sendEmergencyAlert(...) { ... }
