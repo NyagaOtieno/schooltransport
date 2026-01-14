@@ -29,11 +29,6 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/manifests", manifestRoutes);
 
 
-app.use(cors({
-  origin: "https://trackmykid-webapp.vercel.app", // your frontend URL
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  credentials: true,
-}));
 // -----------------------------
 // Middleware: Log all incoming requests
 // -----------------------------

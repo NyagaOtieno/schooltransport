@@ -33,21 +33,52 @@ app.use((req, res, next) => {
   next();
 });
 
-
 app.set("trust proxy", 1);
 
 // -----------------------------
-// Middleware
+// Allowed origins
+// -----------------------------
+const allowedOrigins = [
+  "https://trackmykid-webapp.vercel.app",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:5173"
+];
+
+// -----------------------------
+// CORS middleware
 // -----------------------------
 app.use(cors({
-  origin: [
-    "https://trackmykid-webapp.vercel.app",
-    "http://localhost:3000"
-  ],
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  origin: function(origin, callback){
+    if (!origin) return callback(null, true); // allow Postman, curl
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error(`CORS blocked for origin ${origin}`));
+  },
+  credentials: true,
+  methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"]
+}));
+
+// -----------------------------
+// Preflight OPTIONS handler
+// -----------------------------
+app.options("*", cors({
+  origin: function(origin, callback){
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error(`CORS blocked for origin ${origin}`));
+  },
   credentials: true
 }));
+
+
+// Preflight OPTIONS handler
+app.options("*", cors());
+
+
+// Handle preflight
+app.options("*", cors());
+app.options("*", cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
