@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { sendResetOtpEmail } from "../services/email.service.js";
 
+
 // -----------------------------
 // Password strength checker
 // -----------------------------
