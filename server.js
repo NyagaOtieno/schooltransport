@@ -18,7 +18,7 @@ import smsRoutes from "./src/routes/sms.routes.js";
 import notificationRoutes from "./src/routes/notification.routes.js";
 import manifestRoutes from "./src/routes/manifestRoutes.js";
 import cors from "cors";
-import authRoutes from "./src/routes/auth.routes.js";
+import authRoutes from "./src/routes/authRoutes.js";
 
 const PORT = process.env.PORT || 5000;
 
