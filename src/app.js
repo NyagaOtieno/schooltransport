@@ -12,45 +12,29 @@ import parentRoutes from "./routes/parentRoutes.js";
 import driverRoutes from "./routes/driverRoutes.js";
 import assistantRoutes from "./routes/assistantRoutes.js";
 import manifestRoutes from "./routes/manifestRoutes.js";
-import trackingRoutes from "./routes/trackingRoutes.js"; // ✅ Added live tracking route
+import trackingRoutes from "./routes/trackingRoutes.js";
 import panicRoutes from "./routes/panicRoutes.js";
 
 dotenv.config();
 
 const app = express();
-// -----------------------------
-// 🔐 CORS – MUST BE FIRST
-// -----------------------------
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "https://trackmykid-webapp.vercel.app");
-  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.header("Access-Control-Allow-Credentials", "true");
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-  next();
-});
-
-app.set("trust proxy", 1);
 
 // -----------------------------
 // Allowed origins
 // -----------------------------
 const allowedOrigins = [
-  "https://trackmykid-webapp.vercel.app",
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "http://localhost:5173"
+  "http://localhost:3000",                 // local dev
+  "http://127.0.0.1:3000",                // localhost alternative
+  "http://localhost:5173",                 // Vite dev server
+  "https://trackmykid-webapp.vercel.app"  // production frontend
 ];
 
 // -----------------------------
-// CORS middleware
+// 🔐 CORS middleware
 // -----------------------------
 app.use(cors({
-  origin: function(origin, callback){
-    if (!origin) return callback(null, true); // allow Postman, curl
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true); // allow Postman / curl / mobile apps
     if (allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error(`CORS blocked for origin ${origin}`));
   },
@@ -60,10 +44,10 @@ app.use(cors({
 }));
 
 // -----------------------------
-// Preflight OPTIONS handler
+// Handle OPTIONS preflight globally
 // -----------------------------
 app.options("*", cors({
-  origin: function(origin, callback){
+  origin: function(origin, callback) {
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error(`CORS blocked for origin ${origin}`));
@@ -71,19 +55,14 @@ app.options("*", cors({
   credentials: true
 }));
 
-
-// Preflight OPTIONS handler
-app.options("*", cors());
-
-
-// Handle preflight
-app.options("*", cors());
-app.options("*", cors());
+// -----------------------------
+// Body parsers
+// -----------------------------
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // -----------------------------
-// Debug logger for all incoming requests
+// Debug logger
 // -----------------------------
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -102,18 +81,18 @@ app.use("/api/parents", parentRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/assistants", assistantRoutes);
 app.use("/api/manifests", manifestRoutes);
-app.use("/api/tracking", trackingRoutes); // ✅ New tracking route
+app.use("/api/tracking", trackingRoutes);
 app.use("/api/panic", panicRoutes);
 
 // -----------------------------
-// Health check route (for Railway)
+// Health check
 // -----------------------------
 app.get("/health", (req, res) => {
   res.json({ status: "ok", message: "API is running 🚀" });
 });
 
 // -----------------------------
-// Catch-all 404 route
+// 404 handler
 // -----------------------------
 app.use((req, res, next) => {
   console.warn(`⚠️ 404 Not Found: ${req.method} ${req.url}`);
@@ -129,3 +108,4 @@ app.use((err, req, res, next) => {
 });
 
 export default app;
+

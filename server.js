@@ -23,13 +23,37 @@ import authRoutes from "./src/routes/authRoutes.js";
 const PORT = process.env.PORT || 5000;
 
 // -----------------------------
+// ✅ CORS (ALLOWLIST) — ADD THIS
+// -----------------------------
+const allowlist = (process.env.CORS_ORIGINS ||
+  "https://trackmykid-webapp.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      if (allowlist.includes(origin)) return cb(null, true);
+      return cb(new Error("Not allowed by CORS: " + origin));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+app.options("*", cors());
+
+// -----------------------------
 // Register main routes
 // -----------------------------
 app.use("/api/sms", smsRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/manifests", manifestRoutes);
-app.use("/api/auth", authRoutes); 
-
+app.use("/api/auth", authRoutes);
 
 // -----------------------------
 // Middleware: Log all incoming requests
