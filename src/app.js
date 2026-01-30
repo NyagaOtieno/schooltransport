@@ -7,7 +7,7 @@ dotenv.config(); // Load .env first
 
 
 // Core imports
-import app from "./src/app.js";
+import app from "./app.js";
 import prisma from "./src/middleware/prisma.js";
 
 // -----------------------------
