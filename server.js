@@ -20,6 +20,8 @@ import notificationRoutes from "./src/routes/notification.routes.js";
 import manifestRoutes from "./src/routes/manifestRoutes.js";
 import cors from "cors";
 import authRoutes from "./src/routes/authRoutes.js";
+import panicRoutes from "./src/routes/panicRoutes.js";
+
 
 const PORT = process.env.PORT || 5000;
 
@@ -55,6 +57,8 @@ app.use("/api/sms", smsRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/manifests", manifestRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api", panicRoutes);
+
 
 // -----------------------------
 // Middleware: Log all incoming requests
