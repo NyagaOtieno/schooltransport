@@ -5,8 +5,6 @@
 import dotenv from "dotenv";
 dotenv.config(); // Load .env first
 
-// Run any scheduled jobs (cron)
-import "./cron.js";
 
 // Core imports
 import app from "./src/app.js";
