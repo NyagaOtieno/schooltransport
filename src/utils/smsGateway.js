@@ -1,4 +1,5 @@
-import axios from "axios";
+// src/utils/smsGateway.js
+import axios from "axios"; 
 
 const MSPACE_URL = "https://api.mspace.co.ke/smsapi/v2/sendtext";
 const MSPACE_KEY = process.env.MSPACE_API_KEY;

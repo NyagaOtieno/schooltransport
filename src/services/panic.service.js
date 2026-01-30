@@ -1,3 +1,4 @@
+// src/services/panic.service.js
 import prisma from "../middleware/prisma.js";
 import { sendEmergencyAlert } from "./notification.service.js";
 

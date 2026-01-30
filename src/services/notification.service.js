@@ -1,3 +1,4 @@
+// src/services/notification.service.js
 import { sendSms } from "../utils/smsGateway.js";
 
 /**
