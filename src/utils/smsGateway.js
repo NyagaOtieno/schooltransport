@@ -1,5 +1,5 @@
 // src/utils/smsGateway.js
-import axios from "axios"; 
+import axios from "axios";
 
 const MSPACE_URL = "https://api.mspace.co.ke/smsapi/v2/sendtext";
 const MSPACE_KEY = process.env.MSPACE_API_KEY;
@@ -26,7 +26,7 @@ export async function sendSms(to, message) {
     console.log("Mspace response:", response.data);
 
     const messages = response.data?.message || [];
-    const failed = messages.filter(m => String(m.status) !== "111");
+    const failed = messages.filter((m) => String(m.status) !== "111");
 
     if (failed.length === 0) {
       return { success: true, data: messages };

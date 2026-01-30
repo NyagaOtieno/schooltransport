@@ -10,7 +10,10 @@ export async function triggerPanic(req, res) {
       return res.status(401).json({ error: "Unauthorized user" });
     }
 
-    if (!latitude || !longitude) {
+    const lat = typeof latitude === "string" ? Number(latitude) : latitude;
+    const lng = typeof longitude === "string" ? Number(longitude) : longitude;
+
+    if (lat === null || lat === undefined || Number.isNaN(lat) || lng === null || lng === undefined || Number.isNaN(lng)) {
       return res.status(400).json({ error: "Location is required" });
     }
 
@@ -19,11 +22,11 @@ export async function triggerPanic(req, res) {
     }
 
     const panicEvent = await createPanicEvent({
-      userId: id,               // ✅ FIXED
+      userId: id,
       phoneNumber: phone || "",
       role,
-      latitude,
-      longitude,
+      latitude: lat,
+      longitude: lng,
       childId,
       createdBy: name || "Unknown",
       ipAddress: req.ip || null,
@@ -40,7 +43,6 @@ export async function triggerPanic(req, res) {
   } catch (error) {
     console.error("PANIC ERROR:", error.message);
 
-    // Handle known business errors cleanly
     if (error.message === "Panic cooldown active") {
       return res.status(429).json({
         success: false,

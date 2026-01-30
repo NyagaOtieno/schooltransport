@@ -1,68 +1,67 @@
-import express from "express";
-import cors from "cors";
+// server.js
+// -----------------------------
+// Load environment + dependencies
+// -----------------------------
 import dotenv from "dotenv";
+dotenv.config(); // Load .env first
 
-// Routes
-import authRoutes from "./routes/authRoutes.js";
-import userRoutes from "./routes/userRoutes.js";
-import schoolRoutes from "./routes/schoolRoutes.js";
-import busRoutes from "./routes/busRoutes.js";
-import studentRoutes from "./routes/studentRoutes.js";
-import parentRoutes from "./routes/parentRoutes.js";
-import driverRoutes from "./routes/driverRoutes.js";
-import assistantRoutes from "./routes/assistantRoutes.js";
-import manifestRoutes from "./routes/manifestRoutes.js";
-import trackingRoutes from "./routes/trackingRoutes.js";
-import panicRoutes from "./routes/panicRoutes.js";
+// Run any scheduled jobs (cron)
+import "./cron.js";
 
-dotenv.config();
-
-const app = express();
+// Core imports
+import app from "./src/app.js";
+import prisma from "./src/middleware/prisma.js";
 
 // -----------------------------
-// Allowed origins
+// Import notification & manifest routes
 // -----------------------------
-const allowedOrigins = [
-  "http://localhost:3000",                 // local dev
-  "http://127.0.0.1:3000",                // localhost alternative
-  "http://localhost:5173",                 // Vite dev server
-  "https://trackmykid-webapp.vercel.app"  // production frontend
-];
+import smsRoutes from "./src/routes/sms.routes.js";
+import notificationRoutes from "./src/routes/notification.routes.js";
+import manifestRoutes from "./src/routes/manifestRoutes.js";
+import cors from "cors";
+import authRoutes from "./src/routes/authRoutes.js";
+import panicRoutes from "./src/routes/panicRoutes.js";
+
+
+const PORT = process.env.PORT || 5000;
 
 // -----------------------------
-// 🔐 CORS middleware
+// ✅ CORS (ALLOWLIST) — ADD THIS
 // -----------------------------
-app.use(cors({
-  origin: function(origin, callback) {
-    if (!origin) return callback(null, true); // allow Postman / curl / mobile apps
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error(`CORS blocked for origin ${origin}`));
-  },
-  credentials: true,
-  methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization"]
-}));
+const allowlist = (process.env.CORS_ORIGINS ||
+  "https://trackmykid-webapp.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      if (allowlist.includes(origin)) return cb(null, true);
+      return cb(new Error("Not allowed by CORS: " + origin));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+app.options("*", cors());
 
 // -----------------------------
-// Handle OPTIONS preflight globally
+// Register main routes
 // -----------------------------
-app.options("*", cors({
-  origin: function(origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error(`CORS blocked for origin ${origin}`));
-  },
-  credentials: true
-}));
+app.use("/api/sms", smsRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/manifests", manifestRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api", panicRoutes);
+
 
 // -----------------------------
-// Body parsers
-// -----------------------------
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-
-// -----------------------------
-// Debug logger
+// Middleware: Log all incoming requests
 // -----------------------------
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -70,42 +69,86 @@ app.use((req, res, next) => {
 });
 
 // -----------------------------
-// Mount routes
-// -----------------------------
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/schools", schoolRoutes);
-app.use("/api/buses", busRoutes);
-app.use("/api/students", studentRoutes);
-app.use("/api/parents", parentRoutes);
-app.use("/api/drivers", driverRoutes);
-app.use("/api/assistants", assistantRoutes);
-app.use("/api/manifests", manifestRoutes);
-app.use("/api/tracking", trackingRoutes);
-app.use("/api/panic", panicRoutes);
-
-// -----------------------------
-// Health check
+// Health check route (important for Railway / Render / Docker)
 // -----------------------------
 app.get("/health", (req, res) => {
   res.json({ status: "ok", message: "API is running 🚀" });
 });
 
 // -----------------------------
-// 404 handler
+// Catch-all route for unknown endpoints
 // -----------------------------
-app.use((req, res, next) => {
+app.use((req, res) => {
   console.warn(`⚠️ 404 Not Found: ${req.method} ${req.url}`);
   res.status(404).json({ error: "Route not found" });
 });
 
 // -----------------------------
-// Global error handler
+// Helper: Retry Prisma connection
 // -----------------------------
-app.use((err, req, res, next) => {
-  console.error("❌ Unhandled Error:", err);
-  res.status(err.status || 500).json({ error: err.message || "Internal Server Error" });
-});
+const connectPrisma = async (retries = 5, delay = 2000) => {
+  for (let i = 1; i <= retries; i++) {
+    try {
+      await prisma.$connect();
+      console.log("✅ Prisma connected successfully");
+      return;
+    } catch (err) {
+      console.error(`⚠️ Prisma connection attempt ${i} failed:`, err.message);
+      if (i === retries) throw err;
+      console.log(`⏳ Retrying in ${delay / 1000}s...`);
+      await new Promise((res) => setTimeout(res, delay));
+    }
+  }
+};
 
-export default app;
+// -----------------------------
+// Graceful shutdown function
+// -----------------------------
+const shutdown = async (server, exitCode = 0) => {
+  console.log("🛑 Shutting down server...");
+  if (server) {
+    server.close(() => console.log("🛑 HTTP server closed"));
+  }
 
+  try {
+    await prisma.$disconnect();
+    console.log("🛑 Prisma Client disconnected");
+  } catch (err) {
+    console.error("❌ Error disconnecting Prisma:", err);
+  }
+
+  process.exit(exitCode);
+};
+
+// -----------------------------
+// Start the server
+// -----------------------------
+const startServer = async () => {
+  try {
+    await connectPrisma();
+
+    const server = app.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+
+    // Handle unexpected errors
+    process.on("uncaughtException", (err) => {
+      console.error("❌ Uncaught Exception:", err);
+      shutdown(server, 1);
+    });
+
+    process.on("unhandledRejection", (reason) => {
+      console.error("❌ Unhandled Rejection:", reason);
+      shutdown(server, 1);
+    });
+
+    // Graceful shutdown on SIGINT / SIGTERM
+    process.on("SIGINT", () => shutdown(server));
+    process.on("SIGTERM", () => shutdown(server));
+  } catch (err) {
+    console.error("❌ Failed to start server:", err);
+    process.exit(1);
+  }
+};
+
+startServer();

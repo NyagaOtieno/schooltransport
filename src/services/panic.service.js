@@ -2,10 +2,6 @@
 import prisma from "../middleware/prisma.js";
 import { sendEmergencyAlert } from "./notification.service.js";
 
-/**
- * Create a panic event and send SMS
- * Accepts: userId, phoneNumber, role, latitude, longitude, childId, createdBy, ipAddress, userAgent
- */
 export async function createPanicEvent({
   userId,
   phoneNumber,
@@ -18,10 +14,18 @@ export async function createPanicEvent({
   userAgent,
 }) {
   if (!userId) throw new Error("userId is required");
-  if (!latitude || !longitude) throw new Error("Location is required");
+
+  const lat = typeof latitude === "string" ? Number(latitude) : latitude;
+  const lng = typeof longitude === "string" ? Number(longitude) : longitude;
+
+  if (lat === null || lat === undefined || Number.isNaN(lat) || lng === null || lng === undefined || Number.isNaN(lng)) {
+    throw new Error("Location is required");
+  }
+
   if (!childId) throw new Error("childId is required");
 
-  // 1️⃣ Cooldown check: prevent multiple panics within 60 seconds
+  const safeRole = ["ADMIN","DRIVER","ASSISTANT","PARENT"].includes(role) ? role : "PARENT";
+
   const recentPanic = await prisma.panicEvent.findFirst({
     where: {
       userId,
@@ -34,13 +38,14 @@ export async function createPanicEvent({
     throw new Error("Panic cooldown active");
   }
 
-  // 2️⃣ Save panic event to database
   const panicEvent = await prisma.panicEvent.create({
     data: {
       userId,
       childId,
-      latitude,
-      longitude,
+      latitude: lat,
+      longitude: lng,
+      phoneNumber: phoneNumber || null,
+      role: safeRole,
       createdBy: createdBy || "SYSTEM",
       status: "ACTIVE",
       ipAddress,
@@ -48,11 +53,10 @@ export async function createPanicEvent({
     },
   });
 
-  // 3️⃣ Trigger emergency alert (SMS/email/etc)
   await sendEmergencyAlert({
-    phoneNumber,
-    panicId: panicEvent.id,
-    userId,
+    phone: phoneNumber,
+    name: createdBy || "User",
+    location: `https://maps.google.com/?q=${lat},${lng}`,
   });
 
   return panicEvent;

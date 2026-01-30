@@ -16,9 +16,6 @@ function normalizePhone(phone) {
   return p;
 }
 
-/**
- * Notify a parent about a student's bus event
- */
 export async function notifyParent({
   parentName,
   parentPhone,
@@ -65,9 +62,6 @@ export async function notifyParent({
   }
 }
 
-/**
- * ✅ Send OTP SMS (FOR AUTH / PASSWORD RESET)
- */
 export async function sendOtpSms({ phone, otp, purpose = "password reset" }) {
   try {
     const normalizedPhone = normalizePhone(phone);
@@ -92,9 +86,7 @@ export async function sendOtpSms({ phone, otp, purpose = "password reset" }) {
     return { success: false, error: err.message || err };
   }
 }
-/**
- * 🚨 Send Emergency / Panic Alert
- */
+
 export async function sendEmergencyAlert({
   phone,
   name = "User",
@@ -105,7 +97,6 @@ export async function sendEmergencyAlert({
       return { success: false, error: "Phone number is required" };
     }
 
-    // Normalize phone
     let normalizedPhone = phone.toString().trim();
     if (normalizedPhone.startsWith("0"))
       normalizedPhone = normalizedPhone.replace(/^0/, "+254");
