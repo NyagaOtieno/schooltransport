@@ -2,12 +2,13 @@
 // -----------------------------
 // Load environment + dependencies
 // -----------------------------
+import express from "express";
 import dotenv from "dotenv";
 dotenv.config(); // Load .env first
 
 
 // Core imports
-import app from "./app.js";
+
 import prisma from "./middleware/prisma.js";
 
 
@@ -23,6 +24,10 @@ import panicRoutes from "./routes/panicRoutes.js";
 
 
 const PORT = process.env.PORT || 5000;
+
+const app = express();
+app.use(express.json());
+
 
 // -----------------------------
 // ✅ CORS (ALLOWLIST) — ADD THIS

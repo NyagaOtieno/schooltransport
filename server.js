@@ -1,4 +1,7 @@
 // server.js
+
+import express from "express";
+import cors from "cors";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -7,6 +10,10 @@ import app from "./src/app.js";
 import prisma from "./src/middleware/prisma.js";
 
 const PORT = process.env.PORT || 5000;
+
+const app = express();
+app.use(express.json());
+
 
 // Helper: Retry Prisma connection
 const connectPrisma = async (retries = 5, delay = 2000) => {
