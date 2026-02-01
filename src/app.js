@@ -1,4 +1,4 @@
-// server.js
+
 // -----------------------------
 // Load environment + dependencies
 // -----------------------------
@@ -61,7 +61,7 @@ app.use("/api/sms", smsRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/manifests", manifestRoutes);
 app.use("/api/auth", authRoutes);
-app.use("/api", panicRoutes);
+app.use("/api/panic", panicRoutes);
 
 
 // -----------------------------
