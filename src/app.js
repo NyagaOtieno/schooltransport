@@ -21,6 +21,7 @@ import manifestRoutes from "./routes/manifestRoutes.js";
 import cors from "cors";
 import authRoutes from "./routes/authRoutes.js";
 import panicRoutes from "./routes/panicRoutes.js";
+import studentRoutes from "./routes/studentRoutes.js";
 
 
 const PORT = process.env.PORT || 5000;
