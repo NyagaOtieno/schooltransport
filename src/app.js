@@ -8,7 +8,8 @@ dotenv.config(); // Load .env first
 
 // Core imports
 import app from "./app.js";
-import prisma from "./src/middleware/prisma.js";
+import prisma from "./middleware/prisma.js";
+
 
 // -----------------------------
 // Import notification & manifest routes
