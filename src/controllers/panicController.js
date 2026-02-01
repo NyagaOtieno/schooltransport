@@ -3,17 +3,22 @@ import { createPanicEvent } from "../services/panic.service.js";
 
 export async function triggerPanic(req, res) {
   try {
-    const { id, phone, role, name } = req.user || {};
+    const { id, userId, phone, role, name } = req.user || {};
+    const uid = id || userId; // ✅ FIX
+
     const { latitude, longitude, childId } = req.body;
 
-    if (!id) {
+    if (!uid) {
       return res.status(401).json({ error: "Unauthorized user" });
     }
 
     const lat = typeof latitude === "string" ? Number(latitude) : latitude;
     const lng = typeof longitude === "string" ? Number(longitude) : longitude;
 
-    if (lat === null || lat === undefined || Number.isNaN(lat) || lng === null || lng === undefined || Number.isNaN(lng)) {
+    if (
+      lat === null || lat === undefined || Number.isNaN(lat) ||
+      lng === null || lng === undefined || Number.isNaN(lng)
+    ) {
       return res.status(400).json({ error: "Location is required" });
     }
 
@@ -22,7 +27,7 @@ export async function triggerPanic(req, res) {
     }
 
     const panicEvent = await createPanicEvent({
-      userId: id,
+      userId: uid, // ✅ use uid
       phoneNumber: phone || "",
       role,
       latitude: lat,
