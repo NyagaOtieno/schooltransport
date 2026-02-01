@@ -14,12 +14,12 @@ import prisma from "./middleware/prisma.js";
 // -----------------------------
 // Import notification & manifest routes
 // -----------------------------
-import smsRoutes from "./src/routes/sms.routes.js";
-import notificationRoutes from "./src/routes/notification.routes.js";
-import manifestRoutes from "./src/routes/manifestRoutes.js";
+import smsRoutes from "./routes/sms.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
+import manifestRoutes from "./routes/manifestRoutes.js";
 import cors from "cors";
-import authRoutes from "./src/routes/authRoutes.js";
-import panicRoutes from "./src/routes/panicRoutes.js";
+import authRoutes from "./routes/authRoutes.js";
+import panicRoutes from "./routes/panicRoutes.js";
 
 
 const PORT = process.env.PORT || 5000;
