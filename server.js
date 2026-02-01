@@ -11,8 +11,7 @@ import prisma from "./src/middleware/prisma.js";
 
 const PORT = process.env.PORT || 5000;
 
-const app = express();
-app.use(express.json());
+
 
 
 // Helper: Retry Prisma connection
