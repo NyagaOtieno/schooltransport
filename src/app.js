@@ -23,6 +23,7 @@ import authRoutes from "./routes/authRoutes.js";
 import panicRoutes from "./routes/panicRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
 import assetRoutes from "./routes/assetRoutes.js";
+import publicRoutes from "./routes/publicRoutes.js";
 
 
 
@@ -67,6 +68,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/panic", panicRoutes);
 app.use("/api/students",studentRoutes);
 app.use("/api/assets", assetRoutes);
+app.use("/api/public", publicRoutes);
 
 
 
