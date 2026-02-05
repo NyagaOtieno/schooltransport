@@ -22,6 +22,8 @@ import cors from "cors";
 import authRoutes from "./routes/authRoutes.js";
 import panicRoutes from "./routes/panicRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
+import assetRoutes from "./routes/assetRoutes.js";
+
 
 
 const PORT = process.env.PORT || 5000;
@@ -64,6 +66,8 @@ app.use("/api/manifests", manifestRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/panic", panicRoutes);
 app.use("/api/students",studentRoutes);
+app.use("/api/assets", assetRoutes);
+
 
 
 
