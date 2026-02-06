@@ -26,7 +26,7 @@ import assetRoutes from "./routes/assetRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import busRoutes from "./routes/busRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
-import schoolsRoutes from "./routes/schoolsRoutes.js";
+import schoolRoutes from "./routes/schoolRoutes.js";
 
 
 
@@ -74,7 +74,7 @@ app.use("/api/assets", assetRoutes);
 app.use("/api/public", publicRoutes);
 app.use("/api/buses", busRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/schools", schoolsRoutes);
+app.use("/api/schools", schoolRoutes);
 
 
 
