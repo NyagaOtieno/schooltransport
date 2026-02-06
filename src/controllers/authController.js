@@ -55,6 +55,7 @@ export const register = async (req, res) => {
         schoolId: Number(schoolId),
       },
     });
+   console.log("LOGIN USER =>", { id: user.id, role: user.role, schoolId: user.schoolId });
 
     // ✅ Optional: issue token immediately on registration
     const token = jwt.sign(
