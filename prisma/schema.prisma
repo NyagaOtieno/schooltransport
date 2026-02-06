@@ -8,20 +8,21 @@ datasource db {
 }
 
 model School {
-  id        Int      @id @default(autoincrement())
+  id        Int       @id @default(autoincrement())
   name      String
   logoUrl   String?
   address   String?
   phone     String?
-  mode      AppMode  @default(KID)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  mode      AppMode   @default(KID)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  buses    Bus[]
-  students Student[]
-  users    User[]
-  assets   Asset[] // ✅ ADD THIS
+  buses     Bus[]
+  students  Student[]
+  users     User[]
+  assets    Asset[]   // ✅ ADD THIS
 }
+
 
 model BusLocation {
   id         Int      @id @default(autoincrement())
@@ -70,7 +71,7 @@ model Parent {
   userId        Int?           @unique
   user          User?          @relation("UserToParent", fields: [userId], references: [id], onDelete: SetNull)
   students      Student[]
-  assets        Asset[] // ✅ ADD THIS
+  assets        Asset[]        // ✅ ADD THIS
   notifications Notification[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
@@ -89,15 +90,15 @@ model User {
   parent Parent? @relation("UserToParent")
 
   // 🔐 Reset password fields
-  resetOtp          String?
-  resetOtpExpiresAt DateTime?
-  resetOtpSentAt    DateTime?
+  resetOtp           String?
+  resetOtpExpiresAt  DateTime?
+  resetOtpSentAt     DateTime?
 
   // Relations
-  driverBuses        Bus[]        @relation("DriverBus")
-  assistantBuses     Bus[]        @relation("AssistantBus")
-  student            Student?     @relation("UserStudent")
-  assistantManifests Manifest[]   @relation("AssistantManifest")
+  driverBuses        Bus[]      @relation("DriverBus")
+  assistantBuses     Bus[]      @relation("AssistantBus")
+  student            Student?   @relation("UserStudent")
+  assistantManifests Manifest[] @relation("AssistantManifest")
   panicEvents        PanicEvent[] @relation("UserToPanicEvents")
 
   createdAt DateTime @default(now())
@@ -107,35 +108,42 @@ model User {
   @@unique([email, schoolId])
   @@unique([phone, schoolId])
 }
-
 model Asset {
   id        Int      @id @default(autoincrement())
   name      String
   type      String?
-  tag       String? // serial / barcode / reg / unique label
-  busId     Int? // optional if asset assigned to a vehicle
-  parentId  Int? // recipient/client
+  tag       String?
+  busId     Int?
+  parentId  Int?
   schoolId  Int
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school    School     @relation(fields: [schoolId], references: [id])
-  parent    Parent?    @relation(fields: [parentId], references: [id], onDelete: SetNull)
-  bus       Bus?       @relation(fields: [busId], references: [id], onDelete: SetNull)
+  // ✅ add these
+  deliveredAt       DateTime?
+  deliveredByUserId Int?
+  confirmedAt       DateTime?
+  confirmedByUserId Int?
+
+  school    School   @relation(fields: [schoolId], references: [id])
+  parent    Parent?  @relation(fields: [parentId], references: [id], onDelete: SetNull)
+  bus       Bus?     @relation(fields: [busId], references: [id], onDelete: SetNull)
   manifests Manifest[]
 }
 
+
+
 model Bus {
-  id          Int      @id @default(autoincrement())
-  name        String
-  plateNumber String   @unique
-  capacity    Int
-  route       String
-  driverId    Int?
-  assistantId Int?
-  createdAt   DateTime @default(now())
-  schoolId    Int
-  updatedAt   DateTime @updatedAt
+  id            Int            @id @default(autoincrement())
+  name          String
+  plateNumber   String
+  capacity      Int
+  route         String
+  driverId      Int?
+  assistantId   Int?
+  createdAt     DateTime       @default(now())
+  schoolId      Int
+  updatedAt     DateTime       @updatedAt
 
   assistant     User?          @relation("AssistantBus", fields: [assistantId], references: [id])
   driver        User?          @relation("DriverBus", fields: [driverId], references: [id])
@@ -144,8 +152,10 @@ model Bus {
   liveLocations LiveLocation[]
   manifests     Manifest[]
   students      Student[]
-  assets        Asset[] // ✅ ADD THIS
+  assets        Asset[]        // ✅ ADD THIS
+  @@unique([schoolId, plateNumber])
 }
+
 
 model Student {
   id        Int      @id @default(autoincrement())
@@ -160,11 +170,11 @@ model Student {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  bus         Bus          @relation(fields: [busId], references: [id])
-  parent      Parent?      @relation(fields: [parentId], references: [id], onDelete: SetNull)
-  school      School       @relation(fields: [schoolId], references: [id])
-  user        User?        @relation("UserStudent", fields: [userId], references: [id])
-  manifests   Manifest[]
+  bus       Bus        @relation(fields: [busId], references: [id])
+  parent    Parent?    @relation(fields: [parentId], references: [id], onDelete: SetNull)
+  school    School     @relation(fields: [schoolId], references: [id])
+  user      User?      @relation("UserStudent", fields: [userId], references: [id])
+  manifests Manifest[]
   panicEvents PanicEvent[]
 }
 
@@ -203,7 +213,7 @@ model PanicEvent {
   role        Role
   ipAddress   String?
   userAgent   String?
-  status      PanicStatus
+  status      PanicStatus 
   createdAt   DateTime    @default(now())
   createdBy   String
 
@@ -213,6 +223,8 @@ model PanicEvent {
   @@index([userId])
   @@index([childId])
 }
+
+
 
 enum Role {
   ADMIN
@@ -236,8 +248,8 @@ enum PanicStatus {
   PENDING
   ACKNOWLEDGED
   RESOLVED
+  
 }
-
 enum AppMode {
   KID
   ASSET
