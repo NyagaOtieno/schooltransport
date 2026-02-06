@@ -3,7 +3,6 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { sendResetOtpEmail } from "../services/email.service.js";
 
-
 // -----------------------------
 // Password strength checker
 // -----------------------------
@@ -24,14 +23,16 @@ export const register = async (req, res) => {
     const { name, email, phone, password, role, schoolId } = req.body;
 
     if (!name || !email || !password || !role || !schoolId) {
-      return res.status(400).json({ error: "All required fields must be provided" });
+      return res
+        .status(400)
+        .json({ error: "All required fields must be provided" });
     }
 
     // Check for existing user in same school
     const existingUser = await prisma.user.findFirst({
       where: {
-        schoolId,
-        OR: [{ email }, { phone }],
+        schoolId: Number(schoolId),
+        OR: [{ email }, ...(phone ? [{ phone }] : [])],
       },
     });
 
@@ -43,22 +44,36 @@ export const register = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
- const token = jwt.sign(
-  {
-    userId: user.id,
-    role: user.role,
-    schoolId: user.schoolId, // ✅ ADD THIS
-  },
-  process.env.JWT_SECRET,
-  { expiresIn: "1h" }
-);
+    // ✅ Create user
+    const user = await prisma.user.create({
+      data: {
+        name,
+        email,
+        phone: phone || null,
+        password: hashedPassword,
+        role,
+        schoolId: Number(schoolId),
+      },
+    });
 
+    // ✅ Optional: issue token immediately on registration
+    const token = jwt.sign(
+      {
+        userId: user.id,
+        role: user.role,
+        schoolId: user.schoolId,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
 
     const { password: _, ...userWithoutPassword } = user;
 
     res.status(201).json({
       message: "User registered successfully",
+      token,
       user: userWithoutPassword,
+      instructions: "Use this token as Bearer token in Authorization header",
     });
   } catch (error) {
     console.error("REGISTER ERROR:", error);
@@ -74,7 +89,9 @@ export const login = async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
+      return res
+        .status(400)
+        .json({ error: "Email and password are required" });
     }
 
     // Support multiple schools: findFirst
@@ -84,8 +101,13 @@ export const login = async (req, res) => {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: "Invalid credentials" });
 
+    // ✅ Include schoolId in token (this fixes your Forbidden error)
     const token = jwt.sign(
-      { userId: user.id, role: user.role },
+      {
+        userId: user.id,
+        role: user.role,
+        schoolId: user.schoolId, // ✅ ADD THIS
+      },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
@@ -119,7 +141,9 @@ export const forgotPassword = async (req, res) => {
     if (user.resetOtpSentAt) {
       const diff = Date.now() - new Date(user.resetOtpSentAt).getTime();
       if (diff < 60 * 1000) {
-        return res.status(429).json({ error: "Please wait before requesting another OTP" });
+        return res
+          .status(429)
+          .json({ error: "Please wait before requesting another OTP" });
       }
     }
 
@@ -151,12 +175,15 @@ export const resetPassword = async (req, res) => {
     const { email, otp, newPassword } = req.body;
 
     if (!email || !otp || !newPassword) {
-      return res.status(400).json({ error: "Email, OTP, and new password are required" });
+      return res
+        .status(400)
+        .json({ error: "Email, OTP, and new password are required" });
     }
 
     if (!isStrongPassword(newPassword)) {
       return res.status(400).json({
-        error: "Password must be at least 8 characters and include uppercase, lowercase, and a number",
+        error:
+          "Password must be at least 8 characters and include uppercase, lowercase, and a number",
       });
     }
 
