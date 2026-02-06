@@ -22,8 +22,8 @@ router.post("/register", async (req, res) => {
     // Check if email or phone already exists within the same school
     const existingUser = await prisma.user.findFirst({
       where: {
-        schoolId,
-        OR: [{ email }, { phone }],
+        schoolId: Number(schoolId),
+        OR: [{ email }, ...(phone ? [{ phone }] : [])],
       },
     });
 
@@ -37,7 +37,7 @@ router.post("/register", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
-      data: { name, email, phone, password: hashedPassword, role, schoolId },
+      data: { name, email, phone, password: hashedPassword, role, schoolId: Number(schoolId) },
     });
 
     const { password: _, ...userWithoutPassword } = user;
@@ -71,9 +71,16 @@ router.post("/login", async (req, res) => {
     if (!valid) return res.status(401).json({ error: "Invalid credentials" });
 
     // Generate JWT
-    const token = jwt.sign({ userId: user.id, role: user.role }, process.env.JWT_SECRET, {
-      expiresIn: "7d",
-    });
+  const token = jwt.sign(
+  {
+    userId: user.id,
+    role: user.role,
+    schoolId: user.schoolId, // ✅ ADD THIS
+  },
+  process.env.JWT_SECRET,
+  { expiresIn: "1d" }
+);
+
 
     const { password: _, ...userWithoutPassword } = user;
 
