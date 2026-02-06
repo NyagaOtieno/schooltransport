@@ -65,7 +65,7 @@ export const register = async (req, res) => {
         schoolId: user.schoolId,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "1d" }
     );
 
     const { password: _, ...userWithoutPassword } = user;
