@@ -6,25 +6,31 @@ import { authMiddleware } from "../middleware/auth.js";
 const router = express.Router();
 
 /**
- * ✅ ASSET TRACKING (AUTH REQUIRED)
- * These are NEW routes for tracking; they don't break your CRUD.
+ * Helper: require schoolId from token
  */
+function requireSchool(req, res) {
+  const schoolId = req.user?.schoolId;
+  if (!schoolId) {
+    res.status(403).json({ success: false, message: "Forbidden: token missing schoolId" });
+    return null;
+  }
+  return Number(schoolId);
+}
+
+/* =========================================================
+   ✅ ASSET TRACKING (AUTH REQUIRED)
+   ========================================================= */
 
 // ✅ GET asset by TAG (scoped by token schoolId)
 router.get("/tag/:tag", authMiddleware, async (req, res) => {
   try {
-    const schoolId = req.user?.schoolId;
-    if (!schoolId) {
-      return res.status(403).json({ success: false, message: "Forbidden: token missing schoolId" });
-    }
+    const schoolId = requireSchool(req, res);
+    if (!schoolId) return;
 
     const tag = req.params.tag;
 
     const asset = await prisma.asset.findFirst({
-      where: {
-        tag,
-        schoolId: Number(schoolId),
-      },
+      where: { tag, schoolId },
       include: {
         parent: { include: { user: true } },
         bus: true,
@@ -44,15 +50,13 @@ router.get("/tag/:tag", authMiddleware, async (req, res) => {
 // ✅ GET manifest history for asset TAG (scoped)
 router.get("/tag/:tag/manifests", authMiddleware, async (req, res) => {
   try {
-    const schoolId = req.user?.schoolId;
-    if (!schoolId) {
-      return res.status(403).json({ success: false, message: "Forbidden: token missing schoolId" });
-    }
+    const schoolId = requireSchool(req, res);
+    if (!schoolId) return;
 
     const tag = req.params.tag;
 
     const asset = await prisma.asset.findFirst({
-      where: { tag, schoolId: Number(schoolId) },
+      where: { tag, schoolId },
       select: { id: true },
     });
 
@@ -60,7 +64,11 @@ router.get("/tag/:tag/manifests", authMiddleware, async (req, res) => {
 
     const manifests = await prisma.manifest.findMany({
       where: { assetId: asset.id },
-      include: { bus: true, assistant: true, asset: true },
+      include: {
+        bus: true,
+        assistant: true,
+        asset: true,
+      },
       orderBy: { createdAt: "desc" },
     });
 
@@ -71,13 +79,11 @@ router.get("/tag/:tag/manifests", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ CREATE manifest for asset TAG (scoped) — for dispatch/delivery scans
+// ✅ CREATE manifest for asset TAG (scoped)
 router.post("/tag/:tag/manifests", authMiddleware, async (req, res) => {
   try {
-    const schoolId = req.user?.schoolId;
-    if (!schoolId) {
-      return res.status(403).json({ success: false, message: "Forbidden: token missing schoolId" });
-    }
+    const schoolId = requireSchool(req, res);
+    if (!schoolId) return;
 
     const tag = req.params.tag;
     const { busId, assistantId, status, latitude, longitude, session } = req.body;
@@ -87,16 +93,14 @@ router.post("/tag/:tag/manifests", authMiddleware, async (req, res) => {
     }
 
     const asset = await prisma.asset.findFirst({
-      where: { tag, schoolId: Number(schoolId) },
+      where: { tag, schoolId },
       select: { id: true },
     });
-
     if (!asset) return res.status(404).json({ success: false, message: "Asset not found" });
 
     const bus = await prisma.bus.findFirst({
-      where: { id: Number(busId), schoolId: Number(schoolId) },
+      where: { id: Number(busId), schoolId },
     });
-
     if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this school" });
 
     const now = new Date();
@@ -131,11 +135,18 @@ router.post("/tag/:tag/manifests", authMiddleware, async (req, res) => {
   }
 });
 
+/* =========================================================
+   ✅ ASSET CRUD (SECURED: schoolId comes from token ONLY)
+   ========================================================= */
 
-// ✅ GET all assets
-router.get("/", async (req, res) => {
+// ✅ GET all assets (scoped)
+router.get("/", authMiddleware, async (req, res) => {
   try {
+    const schoolId = requireSchool(req, res);
+    if (!schoolId) return;
+
     const assets = await prisma.asset.findMany({
+      where: { schoolId },
       include: {
         parent: { include: { user: true } },
         bus: true,
@@ -151,11 +162,14 @@ router.get("/", async (req, res) => {
   }
 });
 
-// ✅ GET asset by ID
-router.get("/:id", async (req, res) => {
+// ✅ GET asset by ID (scoped)
+router.get("/:id", authMiddleware, async (req, res) => {
   try {
-    const asset = await prisma.asset.findUnique({
-      where: { id: Number(req.params.id) },
+    const schoolId = requireSchool(req, res);
+    if (!schoolId) return;
+
+    const asset = await prisma.asset.findFirst({
+      where: { id: Number(req.params.id), schoolId },
       include: {
         parent: { include: { user: true } },
         bus: true,
@@ -171,19 +185,25 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// ✅ CREATE asset
-router.post("/", async (req, res) => {
+// ✅ CREATE asset (scoped) — IGNORE body.schoolId
+router.post("/", authMiddleware, async (req, res) => {
   try {
-    const { name, type, tag, parentId, busId, schoolId } = req.body;
+    const schoolId = requireSchool(req, res);
+    if (!schoolId) return;
+
+    const { name, type, tag, parentId, busId } = req.body;
 
     if (!name) return res.status(400).json({ success: false, message: "Asset name is required" });
-    if (!schoolId) return res.status(400).json({ success: false, message: "schoolId is required" });
 
+    // Validate bus belongs to same school if provided
     if (busId) {
-      const bus = await prisma.bus.findUnique({ where: { id: Number(busId) } });
-      if (!bus) return res.status(404).json({ success: false, message: "Bus not found" });
+      const bus = await prisma.bus.findFirst({
+        where: { id: Number(busId), schoolId },
+      });
+      if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this school" });
     }
 
+    // Parent table has no schoolId field; we can only validate existence
     if (parentId) {
       const parent = await prisma.parent.findUnique({ where: { id: Number(parentId) } });
       if (!parent) return res.status(404).json({ success: false, message: "Parent/Client not found" });
@@ -196,7 +216,7 @@ router.post("/", async (req, res) => {
         tag: tag ?? null,
         parentId: parentId ? Number(parentId) : null,
         busId: busId ? Number(busId) : null,
-        schoolId: Number(schoolId),
+        schoolId, // ✅ from token
       },
       include: {
         parent: { include: { user: true } },
@@ -212,27 +232,45 @@ router.post("/", async (req, res) => {
   }
 });
 
-// ✅ UPDATE asset
-router.put("/:id", async (req, res) => {
+// ✅ UPDATE asset (scoped) — DO NOT allow changing schoolId
+router.put("/:id", authMiddleware, async (req, res) => {
   try {
+    const schoolId = requireSchool(req, res);
+    if (!schoolId) return;
+
     const { id } = req.params;
 
-    if (req.body.busId) {
-      const bus = await prisma.bus.findUnique({ where: { id: Number(req.body.busId) } });
-      if (!bus) return res.status(404).json({ success: false, message: "Bus not found" });
+    // Ensure asset belongs to this school
+    const existing = await prisma.asset.findFirst({
+      where: { id: Number(id), schoolId },
+      select: { id: true },
+    });
+    if (!existing) return res.status(404).json({ success: false, message: "Asset not found" });
+
+    // Validate bus belongs to same school if provided
+    if (req.body.busId !== undefined && req.body.busId !== null && req.body.busId !== "") {
+      const bus = await prisma.bus.findFirst({
+        where: { id: Number(req.body.busId), schoolId },
+      });
+      if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this school" });
     }
-    if (req.body.parentId) {
+
+    // Validate parent existence if provided
+    if (req.body.parentId !== undefined && req.body.parentId !== null && req.body.parentId !== "") {
       const parent = await prisma.parent.findUnique({ where: { id: Number(req.body.parentId) } });
       if (!parent) return res.status(404).json({ success: false, message: "Parent/Client not found" });
     }
 
+    // ❌ Never trust / allow schoolId updates from body
+    const { schoolId: _ignoreSchoolId, ...safeBody } = req.body;
+
     const updated = await prisma.asset.update({
       where: { id: Number(id) },
       data: {
-        ...req.body,
-        ...(req.body.parentId !== undefined ? { parentId: req.body.parentId ? Number(req.body.parentId) : null } : {}),
-        ...(req.body.busId !== undefined ? { busId: req.body.busId ? Number(req.body.busId) : null } : {}),
-        ...(req.body.schoolId !== undefined ? { schoolId: Number(req.body.schoolId) } : {}),
+        ...safeBody,
+        ...(safeBody.parentId !== undefined ? { parentId: safeBody.parentId ? Number(safeBody.parentId) : null } : {}),
+        ...(safeBody.busId !== undefined ? { busId: safeBody.busId ? Number(safeBody.busId) : null } : {}),
+        schoolId, // ✅ enforce same school always
       },
       include: {
         parent: { include: { user: true } },
@@ -248,11 +286,23 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// ✅ DELETE asset
-router.delete("/:id", async (req, res) => {
+// ✅ DELETE asset (scoped)
+router.delete("/:id", authMiddleware, async (req, res) => {
   try {
+    const schoolId = requireSchool(req, res);
+    if (!schoolId) return;
+
     const { id } = req.params;
+
+    // Ensure asset belongs to this school
+    const existing = await prisma.asset.findFirst({
+      where: { id: Number(id), schoolId },
+      select: { id: true },
+    });
+    if (!existing) return res.status(404).json({ success: false, message: "Asset not found" });
+
     await prisma.asset.delete({ where: { id: Number(id) } });
+
     res.status(200).json({ success: true, message: "Asset deleted successfully" });
   } catch (error) {
     console.error("Error deleting asset:", error);
