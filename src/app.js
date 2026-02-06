@@ -24,7 +24,7 @@ import panicRoutes from "./routes/panicRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
 import assetRoutes from "./routes/assetRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
-import busesRoutes from "./routes/busesRoutes.js";
+import busRoutes from "./routes/busRoutes.js";
 import usersRoutes from "./routes/usersRoutes.js";
 import schoolsRoutes from "./routes/schoolsRoutes.js";
 
@@ -72,7 +72,7 @@ app.use("/api/panic", panicRoutes);
 app.use("/api/students",studentRoutes);
 app.use("/api/assets", assetRoutes);
 app.use("/api/public", publicRoutes);
-app.use("/api/buses", busesRoutes);
+app.use("/api/buses", busRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/schools", schoolsRoutes);
 
