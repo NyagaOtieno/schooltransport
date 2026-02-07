@@ -127,14 +127,14 @@ model Asset {
   confirmedAt    DateTime?
 
   deliveredByUserId Int?
-  deliveredByUser   User? @relation("AssetDeliveredBy", fields: [deliveredByUserId], references: [id], onDelete: SetNull, map: "Asset_deliveredByUserId_fkey")
+  deliveredByUser   User? @relation("AssetDeliveredBy", fields: [deliveredByUserId], references: [id])
 
   confirmedById Int?
-  confirmedBy   User? @relation("AssetConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull, map: "Asset_confirmedById_fkey")
+  confirmedBy   User? @relation("AssetConfirmedBy", fields: [confirmedById], references: [id])
 
   school    School     @relation(fields: [schoolId], references: [id])
-  parent    Parent?    @relation(fields: [parentId], references: [id], onDelete: SetNull)
-  bus       Bus?       @relation(fields: [busId], references: [id], onDelete: SetNull)
+  parent    Parent?    @relation(fields: [parentId], references: [id])
+  bus       Bus?       @relation(fields: [busId], references: [id])
   manifests Manifest[]
 }
 
