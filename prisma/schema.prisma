@@ -34,8 +34,8 @@ model User {
   role     Role
   password String
 
-  tenantId Int?  // temporary?
-  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId Int
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   parent Parent? @relation("UserToParent")
   client Client? @relation("UserToClient")
@@ -44,7 +44,6 @@ model User {
   resetOtpExpiresAt DateTime?
   resetOtpSentAt    DateTime?
 
-  // Keep Bus Assistant relation as-is
   driverBuses        Bus[]      @relation("DriverBus")
   assistantBuses     Bus[]      @relation("AssistantBus")
   assistantManifests Manifest[] @relation("AssistantManifest")
@@ -52,7 +51,6 @@ model User {
   student     Student?     @relation("UserStudent")
   panicEvents PanicEvent[] @relation("UserToPanicEvents")
 
-  // delivery confirmation users
   deliveredAssets Asset[] @relation("AssetDeliveredBy")
   confirmedAssets Asset[] @relation("AssetConfirmedBy")
 
@@ -65,7 +63,7 @@ model User {
 
 model Parent {
   id       Int   @id @default(autoincrement())
-  tenantId Int?  // temporary
+  tenantId Int
   userId   Int?  @unique
   user     User? @relation("UserToParent", fields: [userId], references: [id], onDelete: SetNull)
 
@@ -80,7 +78,7 @@ model Parent {
 
 model Client {
   id       Int   @id @default(autoincrement())
-  tenantId Int?  // temporary
+  tenantId Int
   userId   Int?  @unique
   user     User? @relation("UserToClient", fields: [userId], references: [id], onDelete: SetNull)
 
@@ -102,10 +100,10 @@ model Bus {
   driverId    Int?
   assistantId Int?
   createdAt   DateTime @default(now())
-  tenantId    Int
-  updatedAt   DateTime @updatedAt
 
-  // ✅ unchanged busassistant relation
+  tenantId  Int
+  updatedAt DateTime @updatedAt
+
   assistant User? @relation("AssistantBus", fields: [assistantId], references: [id], onDelete: SetNull)
   driver    User? @relation("DriverBus", fields: [driverId], references: [id], onDelete: SetNull)
 
@@ -169,8 +167,6 @@ model Asset {
 
   manifests   Manifest[]
   panicEvents PanicEvent[]
- 
-
 }
 
 model Manifest {
@@ -250,7 +246,7 @@ model PanicEvent {
   userId   Int
   childId  Int?
   assetId  Int?
-  tenantId Int?  // temporary
+  tenantId Int
 
   latitude    Float
   longitude   Float
@@ -262,7 +258,7 @@ model PanicEvent {
   createdAt   DateTime    @default(now())
   createdBy   String
 
-  user   User     @relation(fields: [userId], references: [id], name: "UserToPanicEvents", onDelete: Cascade)
+  user   User     @relation("UserToPanicEvents", fields: [userId], references: [id], onDelete: Cascade)
   child  Student? @relation(fields: [childId], references: [id], onDelete: SetNull)
   asset  Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
   tenant Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
