@@ -7,63 +7,126 @@ import { authMiddleware } from "../middleware/auth.js";
 const router = express.Router();
 
 /* =========================
-   Helpers
+   Helpers (kept)
 ========================= */
 const parseId = (id) => {
   const n = Number(id);
-  if (!Number.isFinite(n)) throw new Error("Invalid ID");
-  return n;
+  return Number.isFinite(n) ? n : null; // ✅ safer (no throw)
 };
 
 function requireTenant(req, res) {
-  const tenantId = req.user?.tenantId;
-  if (!tenantId) {
+  const n = Number(req.user?.tenantId);
+  if (!n || !Number.isFinite(n)) {
     res.status(403).json({ success: false, message: "Forbidden: token missing tenantId" });
-    return null;
-  }
-  const n = Number(tenantId);
-  if (!Number.isFinite(n)) {
-    res.status(400).json({ success: false, message: "Invalid tenantId in token" });
     return null;
   }
   return n;
 }
 
 function handleError(res, error, message = "Server error", code = 500) {
-  console.error(error);
+  console.error("❌ ParentRoutes error:", {
+    message: error?.message,
+    code: error?.code,
+    meta: error?.meta,
+    stack: error?.stack,
+  });
+
+  // Prisma known errors
+  if (error?.code === "P2002") {
+    return res.status(409).json({
+      success: false,
+      message: "Duplicate record conflict",
+      detail: error?.meta,
+    });
+  }
+  if (error?.code === "P2003") {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid relation reference (foreign key)",
+      detail: error?.meta,
+    });
+  }
+  if (error?.code === "P2025") {
+    return res.status(404).json({ success: false, message: "Record not found" });
+  }
+
   return res.status(code).json({
     success: false,
     message,
-    detail: error?.message || String(error),
+    detail: process.env.NODE_ENV === "production" ? undefined : (error?.message || String(error)),
   });
 }
 
 async function hashPassword(pw) {
-  return bcrypt.hash(pw || "changeme", 10);
+  return bcrypt.hash(String(pw || "changeme"), 10);
 }
 
-// common includes
+/**
+ * Parent include (fixed casing)
+ * - Parent model has: user, students, notifications
+ */
 const parentInclude = {
   user: true,
   students: {
     include: {
       bus: true,
-      Tenant: true, // ✅ tenant instead of school
+      tenant: true, // ✅ was Tenant
     },
   },
-  assets: {
-    include: {
-      bus: true,
-      Tenant: true,
-    },
-  },
+  notifications: true,
 };
+
+/**
+ * Derived assets for a parent:
+ * Since Parent has no direct assets relation in your schema,
+ * we compute assets from Manifests linked to the parent's students.
+ */
+async function getParentAssetsByStudentManifests(tenantId, parentId) {
+  const assets = await prisma.manifest.findMany({
+    where: {
+      assetId: { not: null },
+      student: {
+        parentId,
+        tenantId,
+      },
+    },
+    select: {
+      asset: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          tag: true,
+          tenantId: true,
+          busId: true,
+          clientId: true,
+          deliveryStatus: true,
+          deliveredAt: true,
+          confirmedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          bus: { select: { id: true, name: true, plateNumber: true } },
+          client: { select: { id: true, user: { select: { id: true, name: true, email: true, phone: true } } } },
+          tenant: { select: { id: true, name: true, mode: true } },
+        },
+      },
+    },
+  });
+
+  // de-duplicate by asset.id
+  const map = new Map();
+  for (const row of assets) {
+    if (row.asset?.id) map.set(row.asset.id, row.asset);
+  }
+  return Array.from(map.values());
+}
 
 /* =========================================================
    PARENTS (TENANT-SCOPED)
    - Parent is a wrapper for a User with role=PARENT
-   - Tenant scope enforced via Parent.user.TenantId
-   ========================================================= */
+   - Tenant scope enforced using:
+     Parent.tenantId AND User.tenantId
+========================================================= */
 
 /**
  * GET /api/parents
@@ -83,9 +146,10 @@ router.get("/", authMiddleware, async (req, res) => {
     const skip = (page - 1) * limit;
 
     const where = {
+      tenantId,
       user: {
         role: "PARENT",
-        TenantId: tenantId,
+        tenantId,
         ...(q
           ? {
               OR: [
@@ -109,13 +173,15 @@ router.get("/", authMiddleware, async (req, res) => {
       }),
     ]);
 
-    return res.json({
-      success: true,
-      page,
-      limit,
-      count,
-      data: parents,
-    });
+    // Keep your “assets” feature: return derived assets per parent (optional cost)
+    const withAssets = await Promise.all(
+      parents.map(async (p) => {
+        const assets = await getParentAssetsByStudentManifests(tenantId, p.id);
+        return { ...p, assets };
+      })
+    );
+
+    return res.json({ success: true, page, limit, count, data: withAssets });
   } catch (error) {
     return handleError(res, error, "Failed to fetch parents");
   }
@@ -130,20 +196,22 @@ router.get("/:id", authMiddleware, async (req, res) => {
     if (!tenantId) return;
 
     const parentId = parseId(req.params.id);
+    if (!parentId) return res.status(400).json({ success: false, message: "Invalid parent id" });
 
     const parent = await prisma.parent.findFirst({
       where: {
         id: parentId,
-        user: { role: "PARENT", TenantId: tenantId },
+        tenantId,
+        user: { role: "PARENT", tenantId },
       },
       include: parentInclude,
     });
 
-    if (!parent) {
-      return res.status(404).json({ success: false, message: "Parent not found" });
-    }
+    if (!parent) return res.status(404).json({ success: false, message: "Parent not found" });
 
-    return res.json({ success: true, data: parent });
+    const assets = await getParentAssetsByStudentManifests(tenantId, parentId);
+
+    return res.json({ success: true, data: { ...parent, assets } });
   } catch (error) {
     return handleError(res, error, "Failed to fetch parent");
   }
@@ -152,7 +220,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
 /**
  * POST /api/parents
  * Body: { name, phone, email?, password? }
- * NOTE: tenant comes from token only.
+ * tenant comes from token only.
  */
 router.post("/", authMiddleware, async (req, res) => {
   try {
@@ -162,52 +230,52 @@ router.post("/", authMiddleware, async (req, res) => {
     const { name, email, phone, password } = req.body;
 
     if (!name || !phone) {
-      return res.status(400).json({
-        success: false,
-        message: "name and phone are required",
-      });
+      return res.status(400).json({ success: false, message: "name and phone are required" });
     }
 
-    // Unique within this tenant
+    const cleanEmail = email ? String(email).trim().toLowerCase() : null;
+    const cleanPhone = phone ? String(phone).trim() : null;
+
+    // Unique within tenant
     const existing = await prisma.user.findFirst({
       where: {
-        TenantId: tenantId,
+        tenantId,
         OR: [
-          email ? { email: String(email).trim().toLowerCase() } : undefined,
-          phone ? { phone: String(phone).trim() } : undefined,
+          cleanEmail ? { email: cleanEmail } : undefined,
+          cleanPhone ? { phone: cleanPhone } : undefined,
         ].filter(Boolean),
       },
       select: { id: true },
     });
 
     if (existing) {
-      return res.status(409).json({
-        success: false,
-        message: "Email or phone already exists in this tenant",
-      });
+      return res.status(409).json({ success: false, message: "Email or phone already exists in this tenant" });
     }
 
     const created = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           name: String(name).trim(),
-          email: email ? String(email).trim().toLowerCase() : null,
-          phone: String(phone).trim(),
+          email: cleanEmail,
+          phone: cleanPhone,
           password: await hashPassword(password),
           role: "PARENT",
-          TenantId: tenantId,
+          tenantId,
         },
       });
 
       const parent = await tx.parent.create({
-        data: { userId: user.id },
+        data: {
+          tenantId,
+          user: { connect: { id: user.id } },
+        },
         include: parentInclude,
       });
 
       return parent;
     });
 
-    return res.status(201).json({ success: true, data: created });
+    return res.status(201).json({ success: true, data: { ...created, assets: [] } });
   } catch (error) {
     return handleError(res, error, "Failed to create parent");
   }
@@ -216,7 +284,6 @@ router.post("/", authMiddleware, async (req, res) => {
 /**
  * PUT /api/parents/:id
  * Body: { name?, phone?, email?, password? }
- * NOTE: tenant comes from token only.
  */
 router.put("/:id", authMiddleware, async (req, res) => {
   try {
@@ -224,48 +291,47 @@ router.put("/:id", authMiddleware, async (req, res) => {
     if (!tenantId) return;
 
     const parentId = parseId(req.params.id);
+    if (!parentId) return res.status(400).json({ success: false, message: "Invalid parent id" });
+
     const { name, email, phone, password } = req.body;
 
     const parent = await prisma.parent.findFirst({
-      where: { id: parentId, user: { role: "PARENT", TenantId: tenantId } },
+      where: { id: parentId, tenantId, user: { role: "PARENT", tenantId } },
       include: { user: true },
     });
 
-    if (!parent || !parent.user) {
-      return res.status(404).json({ success: false, message: "Parent not found" });
-    }
+    if (!parent?.user) return res.status(404).json({ success: false, message: "Parent not found" });
 
-    // Enforce uniqueness within tenant for email/phone (excluding current user)
-    if (email || phone) {
+    const cleanEmail = email !== undefined ? (email ? String(email).trim().toLowerCase() : null) : undefined;
+    const cleanPhone = phone !== undefined ? (phone ? String(phone).trim() : null) : undefined;
+
+    // uniqueness check
+    if (cleanEmail !== undefined || cleanPhone !== undefined) {
       const conflict = await prisma.user.findFirst({
         where: {
-          TenantId: tenantId,
+          tenantId,
           NOT: { id: parent.user.id },
           OR: [
-            email ? { email: String(email).trim().toLowerCase() } : undefined,
-            phone ? { phone: String(phone).trim() } : undefined,
+            cleanEmail !== undefined && cleanEmail !== null ? { email: cleanEmail } : undefined,
+            cleanPhone !== undefined && cleanPhone !== null ? { phone: cleanPhone } : undefined,
           ].filter(Boolean),
         },
         select: { id: true },
       });
 
       if (conflict) {
-        return res.status(409).json({
-          success: false,
-          message: "Email or phone already exists in this tenant",
-        });
+        return res.status(409).json({ success: false, message: "Email or phone already exists in this tenant" });
       }
     }
 
-    const updatedUser = await prisma.user.update({
+    await prisma.user.update({
       where: { id: parent.user.id },
       data: {
         ...(name !== undefined ? { name: String(name).trim() } : {}),
-        ...(email !== undefined ? { email: email ? String(email).trim().toLowerCase() : null } : {}),
-        ...(phone !== undefined ? { phone: phone ? String(phone).trim() : null } : {}),
-        ...(password ? { password: await bcrypt.hash(password, 10) } : {}),
-        // ✅ Force tenant safety (never change tenant)
-        TenantId: tenantId,
+        ...(cleanEmail !== undefined ? { email: cleanEmail } : {}),
+        ...(cleanPhone !== undefined ? { phone: cleanPhone } : {}),
+        ...(password ? { password: await bcrypt.hash(String(password), 10) } : {}),
+        tenantId, // enforce tenant safety
         role: "PARENT",
       },
     });
@@ -275,11 +341,9 @@ router.put("/:id", authMiddleware, async (req, res) => {
       include: parentInclude,
     });
 
-    return res.json({
-      success: true,
-      message: "Parent updated",
-      data: { ...refreshed, user: updatedUser },
-    });
+    const assets = await getParentAssetsByStudentManifests(tenantId, parentId);
+
+    return res.json({ success: true, message: "Parent updated", data: { ...refreshed, assets } });
   } catch (error) {
     return handleError(res, error, "Failed to update parent");
   }
@@ -289,6 +353,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
  * DELETE /api/parents/:id
  * - tenant-scoped
  * - deletes Parent then User (transaction)
+ * - blocks delete if students exist
  */
 router.delete("/:id", authMiddleware, async (req, res) => {
   try {
@@ -296,27 +361,21 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     if (!tenantId) return;
 
     const parentId = parseId(req.params.id);
+    if (!parentId) return res.status(400).json({ success: false, message: "Invalid parent id" });
 
     const parent = await prisma.parent.findFirst({
-      where: { id: parentId, user: { role: "PARENT", TenantId: tenantId } },
+      where: { id: parentId, tenantId, user: { role: "PARENT", tenantId } },
       include: { user: true },
     });
 
-    if (!parent || !parent.user) {
-      return res.status(404).json({ success: false, message: "Parent not found" });
-    }
+    if (!parent?.user) return res.status(404).json({ success: false, message: "Parent not found" });
 
-    // Safety: if there are students/assets linked, you can either block delete or allow.
-    // Here: block if still linked.
-    const [studentCount, assetCount] = await Promise.all([
-      prisma.student.count({ where: { parentId: parentId } }),
-      prisma.asset.count({ where: { parentId: parentId } }),
-    ]);
+    const studentCount = await prisma.student.count({ where: { parentId, tenantId } });
 
-    if (studentCount > 0 || assetCount > 0) {
+    if (studentCount > 0) {
       return res.status(400).json({
         success: false,
-        message: `Cannot delete parent. Linked records exist: students=${studentCount}, assets=${assetCount}`,
+        message: `Cannot delete parent. Linked student exist: ${studentCount}`,
       });
     }
 
