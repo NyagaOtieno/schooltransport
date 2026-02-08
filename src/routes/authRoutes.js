@@ -1,3 +1,4 @@
+// src/routes/authRoutes.js
 import express from "express";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
@@ -9,46 +10,78 @@ const router = express.Router();
 
 /* =========================
    Helpers
-   ========================= */
+========================= */
 
 const ALLOWED_ROLES = ["ADMIN", "DRIVER", "ASSISTANT", "PARENT", "CLIENT", "MERCHANT"];
 
-function toUpper(v) {
-  return v ? String(v).trim().toUpperCase() : null;
-}
+const normEmail = (v) => (v ? String(v).trim().toLowerCase() : null);
+const normPhone = (v) => (v ? String(v).trim() : null);
+const toUpper = (v) => (v ? String(v).trim().toUpperCase() : null);
 
-function resolveTenantId(body) {
-  // Backward compatible: accept tenantId OR TenantId OR schoolId
-  const raw = body.tenantId ?? body.TenantId ?? body.schoolId;
-  if (raw === undefined || raw === null || raw === "") return null;
-  const n = Number(raw);
+function toInt(v) {
+  const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Backward compatible: accept tenantId OR TenantId OR schoolId
+ * (Do NOT store TenantId anywhere; only use tenantId in DB)
+ */
+function resolveTenantId(body) {
+  const raw = body?.tenantId ?? body?.TenantId ?? body?.schoolId;
+  if (raw === undefined || raw === null || raw === "") return null;
+  return toInt(raw);
+}
+
 function signToken(user) {
-  const tenantId = user.TenantId ?? user.tenantId ?? user.schoolId ?? null;
+  const tenantId = user?.tenantId ?? null;
 
   return jwt.sign(
     {
       userId: user.id,
       role: toUpper(user.role),
-      tenantId: tenantId !== null && tenantId !== undefined ? Number(tenantId) : null,
+      tenantId: tenantId !== null ? Number(tenantId) : null,
 
       // backward compatibility for old clients
-      schoolId: tenantId !== null && tenantId !== undefined ? Number(tenantId) : null,
+      schoolId: tenantId !== null ? Number(tenantId) : null,
     },
     process.env.JWT_SECRET,
     { expiresIn: "1d" }
   );
 }
 
+function prismaFail(res, err, fallback = "Server error") {
+  console.error("❌ AUTH ERROR:", {
+    code: err?.code,
+    message: err?.message,
+    meta: err?.meta,
+  });
+
+  if (err?.code === "P2002") {
+    return res.status(409).json({
+      success: false,
+      message: "Duplicate conflict",
+      fields: err?.meta?.target,
+    });
+  }
+
+  return res.status(500).json({
+    success: false,
+    message: fallback,
+    detail: process.env.NODE_ENV === "production" ? undefined : err?.message,
+  });
+}
+
 /* =========================
    Register
-   ========================= */
+========================= */
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, phone, password } = req.body;
-    const role = toUpper(req.body.role);
+    const name = req.body?.name ? String(req.body.name).trim() : null;
+    const email = normEmail(req.body?.email);
+    const phone = normPhone(req.body?.phone);
+    const password = req.body?.password ? String(req.body.password) : null;
+    const role = toUpper(req.body?.role);
     const tenantId = resolveTenantId(req.body);
 
     // Validation
@@ -62,25 +95,23 @@ router.post("/register", async (req, res) => {
     if (!ALLOWED_ROLES.includes(role)) {
       return res.status(400).json({
         success: false,
-        message: `Invalid role. Allowed roles: ${ALLOWED_ROLES.join(", ")}`,
+        message: Invalid role. Allowed roles: ${ALLOWED_ROLES.join(", ")},
       });
     }
 
     // Ensure tenant exists
-    const tenant = await prisma.tenant.findUnique({ where: { id: Number(tenantId) } });
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant) {
       return res.status(400).json({ success: false, message: "Tenant does not exist" });
     }
 
-    // Check if email or phone already exists within the same tenant
+    // Check if email/phone already exists within same tenant
     const existingUser = await prisma.user.findFirst({
       where: {
-        TenantId: Number(tenantId),
-        OR: [
-          { email },
-          ...(phone ? [{ phone }] : []),
-        ],
+        tenantId,
+        OR: [{ email }, ...(phone ? [{ phone }] : [])],
       },
+      select: { id: true },
     });
 
     if (existingUser) {
@@ -90,59 +121,68 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(String(password), 10);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
       data: {
-        name: String(name).trim(),
-        email: String(email).trim(),
-        phone: phone ? String(phone).trim() : null,
+        name,
+        email,
+        phone,
         password: hashedPassword,
         role,
-        TenantId: Number(tenantId),
+        tenantId,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        tenantId: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
     const token = signToken(user);
-    const { password: _pw, ...userWithoutPassword } = user;
 
     return res.status(201).json({
       success: true,
       message: "User registered successfully",
       token,
-      user: userWithoutPassword,
+      user,
     });
-  } catch (error) {
-    console.error("REGISTER ERROR:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+  } catch (err) {
+    return prismaFail(res, err, "Failed to register user");
   }
 });
 
 /* =========================
    Login
-   ========================= */
+========================= */
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = normEmail(req.body?.email);
+    const password = req.body?.password ? String(req.body.password) : null;
     const tenantId = resolveTenantId(req.body);
 
     if (!email || !password) {
       return res.status(400).json({ success: false, message: "Email and password are required" });
     }
 
-    // If tenantId is provided, scope login properly (best practice)
     let user = null;
 
     if (tenantId) {
+      // ✅ Correct scoping (best practice)
       user = await prisma.user.findFirst({
-        where: { email: String(email).trim(), TenantId: Number(tenantId) },
+        where: { email, tenantId },
       });
     } else {
-      // Without tenantId, email may exist in multiple tenants -> block & ask for tenantId
+      // If tenantId isn't provided, email could exist in multiple tenants.
       const matches = await prisma.user.findMany({
-        where: { email: String(email).trim() },
-        select: { id: true, TenantId: true },
+        where: { email },
+        select: { id: true, tenantId: true },
+        take: 2, // just to detect multiple
       });
 
       if (matches.length > 1) {
@@ -159,27 +199,28 @@ router.post("/login", async (req, res) => {
 
     if (!user) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
-    const valid = await bcrypt.compare(String(password), user.password);
+    const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
     const token = signToken(user);
-    const { password: _pw, ...userWithoutPassword } = user;
+
+    // Don’t leak password
+    const { password: _pw, ...safeUser } = user;
 
     return res.json({
       success: true,
       message: "Login successful",
       token,
-      user: userWithoutPassword,
+      user: safeUser,
     });
-  } catch (error) {
-    console.error("LOGIN ERROR:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+  } catch (err) {
+    return prismaFail(res, err, "Failed to login");
   }
 });
 
 /* =========================
    Forgot / Reset Password
-   ========================= */
+========================= */
 router.post("/forgot-password", resetPasswordLimiter, forgotPassword);
 router.post("/reset-password", resetPasswordLimiter, resetPassword);
 
