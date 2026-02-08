@@ -13,6 +13,11 @@ const toInt = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+const toStr = (v) => {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
+};
+
 const getIp = (req) =>
   req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
   req.ip ||
@@ -26,9 +31,11 @@ function prismaError(res, err, fallback = "Server error") {
   });
 
   if (err?.code === "P2002") {
-    return res
-      .status(409)
-      .json({ success: false, message: "Duplicate conflict", fields: err?.meta?.target });
+    return res.status(409).json({
+      success: false,
+      message: "Duplicate conflict",
+      fields: err?.meta?.target,
+    });
   }
   if (err?.code === "P2025") {
     return res.status(404).json({ success: false, message: "Record not found" });
@@ -67,11 +74,19 @@ function requireAdmin(req, res, next) {
 }
 
 function pickTenantInput(body) {
-  const name = body?.name !== undefined ? String(body.name).trim() : undefined;
+  const name =
+    body?.name !== undefined ? (body.name === null ? "" : toStr(body.name)) : undefined;
+
   const mode = body?.mode !== undefined ? body.mode : undefined; // AppMode enum validated by Prisma
-  const logoUrl = body?.logoUrl !== undefined ? (body.logoUrl ? String(body.logoUrl) : null) : undefined;
-  const address = body?.address !== undefined ? (body.address ? String(body.address) : null) : undefined;
-  const phone = body?.phone !== undefined ? (body.phone ? String(body.phone) : null) : undefined;
+
+  const logoUrl =
+    body?.logoUrl !== undefined ? (body.logoUrl ? toStr(body.logoUrl) : null) : undefined;
+
+  const address =
+    body?.address !== undefined ? (body.address ? toStr(body.address) : null) : undefined;
+
+  const phone =
+    body?.phone !== undefined ? (body.phone ? toStr(body.phone) : null) : undefined;
 
   return { name, mode, logoUrl, address, phone };
 }
@@ -86,6 +101,22 @@ const tenantSelect = {
   createdAt: true,
   updatedAt: true,
 };
+
+/**
+ * IMPORTANT:
+ * Put static routes BEFORE "/:id" to avoid conflicts.
+ */
+router.get("/_whoami", requireAuth, async (req, res) => {
+  return res.json({
+    success: true,
+    user: {
+      id: req.user?.id,
+      role: req.user?.role,
+      tenantId: req.user?.tenantId,
+    },
+    ip: getIp(req),
+  });
+});
 
 /* =========================
    Routes
@@ -130,6 +161,38 @@ router.get("/", requireAuth, requireAdmin, async (req, res) => {
 });
 
 /**
+ * ✅ ADMIN: POST /api/tenants
+ * Creates a tenant
+ * NOTE: In a strict multi-tenant system, tenant creation is usually only in bootstrap/admin context.
+ */
+router.post("/", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const input = pickTenantInput(req.body);
+
+    if (!input.name) {
+      return res.status(400).json({ success: false, message: "name is required" });
+    }
+
+    const tenant = await prisma.tenant.create({
+      data: {
+        name: input.name,
+        ...(input.mode !== undefined ? { mode: input.mode } : {}),
+        logoUrl: input.logoUrl ?? null,
+        address: input.address ?? null,
+        phone: input.phone ?? null,
+      },
+      select: tenantSelect,
+    });
+
+    return res
+      .status(201)
+      .json({ success: true, message: "Tenant created", data: tenant });
+  } catch (err) {
+    return prismaError(res, err, "Failed to create tenant");
+  }
+});
+
+/**
  * ✅ ADMIN: GET /api/tenants/:id
  */
 router.get("/:id", requireAuth, requireAdmin, async (req, res) => {
@@ -146,36 +209,6 @@ router.get("/:id", requireAuth, requireAdmin, async (req, res) => {
     return res.json({ success: true, data: tenant });
   } catch (err) {
     return prismaError(res, err, "Failed to fetch tenant");
-  }
-});
-
-/**
- * ✅ ADMIN: POST /api/tenants
- * Creates a tenant
- * NOTE: In a strict multi-tenant system, tenant creation is usually only in bootstrap/admin context.
- */
-router.post("/", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const input = pickTenantInput(req.body);
-
-    if (!input.name) {
-      return res.status(400).json({ success: false, message: "name is required" });
-    }
-
-    const tenant = await prisma.tenant.create({
-      data: {
-        name: input.name,
-        mode: input.mode,
-        logoUrl: input.logoUrl ?? null,
-        address: input.address ?? null,
-        phone: input.phone ?? null,
-      },
-      select: tenantSelect,
-    });
-
-    return res.status(201).json({ success: true, message: "Tenant created", data: tenant });
-  } catch (err) {
-    return prismaError(res, err, "Failed to create tenant");
   }
 });
 
@@ -227,22 +260,6 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   } catch (err) {
     return prismaError(res, err, "Failed to delete tenant");
   }
-});
-
-/**
- * ✅ Health/debug helper (optional)
- * GET /api/tenants/_whoami
- */
-router.get("/_whoami", requireAuth, async (req, res) => {
-  return res.json({
-    success: true,
-    user: {
-      id: req.user?.id,
-      role: req.user?.role,
-      tenantId: req.user?.tenantId,
-    },
-    ip: getIp(req),
-  });
 });
 
 export default router;
