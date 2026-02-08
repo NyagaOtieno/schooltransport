@@ -1,41 +1,4 @@
-[3:43 AM, 2/8/2026] NyagaOT: // src/routes/studentRoutes.js
-import express from "express";
-import prisma from "../middleware/prisma.js";
-import bcrypt from "bcryptjs";
-import { authMiddleware } from "../middleware/auth.js";
-
-const router = express.Router();
-
-/**
- * Tenant scoping helper
- */
-function requireTenant(req, res) {
-  const tenantId = req.user?.tenantId;
-  if (!tenantId) {
-    res.status(403).json({ success: false, message: "Forbidden: token missing tenantId" });
-    return null;
-  }
-  return Number(tenantId);
-}
-
-/**
- * Safer ID parsing (returns null instead of throwing)
- */
-function parseId(id) {
-  const n = Number(id);
-  return Number.isFinite(n) ? n : null;
-}
-
-/**
- * Safe number parsing (for latitude/longitude that may come as strings)
- */
-function parseFloatSafe(v) {
-  cons…
-[3:45 AM, 2/8/2026] NyagaOT: {
-    "success": false,
-    "message": "Failed to fetch students",
-    "detail": "\nInvalid prisma.student.findMany() invocation:\n\n{\n  where: {\n    TenantId: 1,\n    ~~~~\n?   AND?: StudentWhereInput | StudentWhereInput[],\n?   OR?: StudentWhereInput[],\n?   NOT?: StudentWhereInput | StudentWhereInput[],\n?   id?: IntFilter | Int,\n?   name?: StringFilter | String,\n?   grade?: StringFilter | String,\n?   latitude?: FloatFilter | Float,\n?   longitude?: FloatFilter | Float,\n?   busId?: IntFilter | Int,\n?   parentId?: IntNullableFilter | Int | Null,\n?   tenantId?: IntFilter | Int,\n?   userId?: IntNullableFilter | Int | Null,\n?   createdAt?: DateTimeFilter | DateTime,\n?   updatedAt?: DateTimeFilter | DateTime,\n?   bus?: BusRelationFilter | BusWhereI…
-[3:48 AM, 2/8/2026] NyagaOT: // src/routes/studentRoutes.js
+// src/routes/studentRoutes.js
 import express from "express";
 import prisma from "../middleware/prisma.js";
 import bcrypt from "bcryptjs";
@@ -44,32 +7,40 @@ import { authMiddleware } from "../middleware/auth.js";
 const router = express.Router();
 
 /* =========================
-   Helpers
+   Helpers (KEEP)
 ========================= */
+
+/**
+ * Tenant scoping helper (kept)
+ */
 function requireTenant(req, res) {
-  const tenantId = req.user?.tenantId;
-  if (!tenantId) {
+  const tenantId = Number(req.user?.tenantId);
+  if (!tenantId || !Number.isFinite(tenantId)) {
     res.status(403).json({ success: false, message: "Forbidden: token missing tenantId" });
     return null;
   }
-  const n = Number(tenantId);
-  if (!Number.isFinite(n)) {
-    res.status(400).json({ success: false, message: "Invalid tenantId in token" });
-    return null;
-  }
-  return n;
+  return tenantId;
 }
 
+/**
+ * Safer ID parsing (kept)
+ */
 function parseId(id) {
   const n = Number(id);
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Safe number parsing (kept)
+ */
 function parseFloatSafe(v) {
   const n = typeof v === "string" ? Number(v) : v;
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Prisma error helper (kept)
+ */
 function prismaError(res, err, fallback = "Server error") {
   console.error("❌ StudentRoutes error:", {
     code: err?.code,
@@ -81,7 +52,7 @@ function prismaError(res, err, fallback = "Server error") {
     return res.status(409).json({
       success: false,
       message: "Duplicate record conflict",
-      fields: err?.meta?.target,
+      detail: err?.meta,
     });
   }
   if (err?.code === "P2003") {
@@ -103,11 +74,10 @@ function prismaError(res, err, fallback = "Server error") {
 }
 
 /* =========================
-   Prisma include/select
-   (✅ use tenant, tenantId — NOT Tenant/TenantId)
+   Common include (FIXED casing only)
 ========================= */
 const studentInclude = {
-  tenant: true,
+  tenant: true, // ✅ was Tenant
   bus: true,
   parent: { include: { user: true } },
 };
@@ -123,8 +93,8 @@ router.get("/", authMiddleware, async (req, res) => {
     if (!tenantId) return;
 
     const students = await prisma.student.findMany({
-      where: { tenantId }, // ✅ fixed
-      include: studentInclude, // ✅ fixed include
+      where: { tenantId }, // ✅ was TenantId
+      include: studentInclude,
       orderBy: { id: "desc" },
     });
 
@@ -181,15 +151,12 @@ router.post("/", authMiddleware, async (req, res) => {
     if (!name || !grade) {
       return res.status(400).json({ success: false, message: "name and grade are required" });
     }
-
     if (!busIdNum) {
       return res.status(400).json({ success: false, message: "Valid busId is required" });
     }
-
     if (latNum === null || lngNum === null) {
       return res.status(400).json({ success: false, message: "Valid latitude and longitude are required" });
     }
-
     if (!parentName && !parentPhone && !parentEmail) {
       return res.status(400).json({
         success: false,
@@ -206,13 +173,15 @@ router.post("/", authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid busId (not found for this tenant)" });
     }
 
-    // Find parent (by user email/phone) within same tenant
-    let existingParent = null;
+    // Find parent by user within same tenant
+    let parent = null;
+
     if (parentPhone || parentEmail) {
-      existingParent = await prisma.parent.findFirst({
+      parent = await prisma.parent.findFirst({
         where: {
-          tenantId, // ✅ fixed
+          tenantId, // ✅ scope parent itself too
           user: {
+            tenantId,
             OR: [
               parentPhone ? { phone: String(parentPhone).trim() } : undefined,
               parentEmail ? { email: String(parentEmail).trim() } : undefined,
@@ -223,22 +192,15 @@ router.post("/", authMiddleware, async (req, res) => {
       });
     }
 
-    const createdStudent = await prisma.$transaction(async (tx) => {
-      let parent = existingParent;
-
+    const created = await prisma.$transaction(async (tx) => {
+      // Create parent user + parent if missing
       if (!parent) {
-        const hashed = await bcrypt.hash(parentPassword || "changeme", 10);
-
-        // ✅ If email missing, generate a safe placeholder to satisfy your schema (email is required)
-        const safeEmail =
-          parentEmail && String(parentEmail).trim()
-            ? String(parentEmail).trim().toLowerCase()
-            : parent_${Date.now()}_${Math.floor(Math.random() * 1000)}@placeholder.local;
+        const hashed = await bcrypt.hash(String(parentPassword || "changeme"), 10);
 
         const user = await tx.user.create({
           data: {
-            name: parentName ? String(parentName).trim() : "Parent",
-            email: safeEmail,
+            name: String(parentName || "Parent").trim(),
+            email: parentEmail ? String(parentEmail).trim() : null,
             phone: parentPhone ? String(parentPhone).trim() : null,
             password: hashed,
             role: "PARENT",
@@ -248,13 +210,14 @@ router.post("/", authMiddleware, async (req, res) => {
 
         parent = await tx.parent.create({
           data: {
-            tenantId, // ✅ fixed
+            tenantId, // ✅ important
             user: { connect: { id: user.id } },
           },
           include: { user: true },
         });
       }
 
+      // Create student
       const student = await tx.student.create({
         data: {
           name: String(name).trim(),
@@ -271,11 +234,7 @@ router.post("/", authMiddleware, async (req, res) => {
       return student;
     });
 
-    return res.status(201).json({
-      success: true,
-      message: "Student created successfully",
-      data: createdStudent,
-    });
+    return res.status(201).json({ success: true, message: "Student created successfully", data: created });
   } catch (err) {
     return prismaError(res, err, "Failed to create student");
   }
@@ -293,73 +252,67 @@ router.put("/:id", authMiddleware, async (req, res) => {
     const { parentName, parentPhone, parentEmail, parentPassword, busId, latitude, longitude, ...rest } = req.body;
 
     const existing = await prisma.student.findFirst({
-      where: { id: studentId, tenantId }, // ✅ fixed
+      where: { id: studentId, tenantId },
       include: { parent: { include: { user: true } } },
     });
     if (!existing) return res.status(404).json({ success: false, message: "Student not found" });
 
-    // Validate bus if changing
-    let busIdNum;
+    // If busId provided, ensure it belongs to tenant
+    let busIdNum = undefined;
     if (busId !== undefined) {
       busIdNum = parseId(busId);
       if (!busIdNum) return res.status(400).json({ success: false, message: "Invalid busId" });
 
       const bus = await prisma.bus.findFirst({
-        where: { id: busIdNum, tenantId }, // ✅ fixed
+        where: { id: busIdNum, tenantId },
         select: { id: true },
       });
       if (!bus) return res.status(400).json({ success: false, message: "Bus not found for this tenant" });
     }
 
-    // Validate lat/lng if changing
+    // lat/lng validation if provided
     const latNum = latitude !== undefined ? parseFloatSafe(latitude) : undefined;
     const lngNum = longitude !== undefined ? parseFloatSafe(longitude) : undefined;
     if (latitude !== undefined && latNum === null) return res.status(400).json({ success: false, message: "Invalid latitude" });
     if (longitude !== undefined && lngNum === null) return res.status(400).json({ success: false, message: "Invalid longitude" });
 
-    const updatedStudent = await prisma.$transaction(async (tx) => {
-      const updated = await tx.student.update({
+    const updated = await prisma.$transaction(async (tx) => {
+      const updatedStudent = await tx.student.update({
         where: { id: studentId },
         data: {
           ...rest,
           ...(busId !== undefined ? { busId: busIdNum } : {}),
           ...(latitude !== undefined ? { latitude: latNum } : {}),
           ...(longitude !== undefined ? { longitude: lngNum } : {}),
-          tenantId, // enforce tenant ✅
+          tenantId, // enforce tenant
         },
         include: studentInclude,
       });
 
-      // Parent update path
+      // Update parent/user if parent fields provided
       if (parentName || parentPhone !== undefined || parentEmail !== undefined || parentPassword) {
         let parent = existing.parent;
 
-        // If missing parent record, create it (tenant-scoped)
+        // If no parent, create + link
         if (!parent) {
           parent = await tx.parent.create({
-            data: { tenantId }, // ✅ fixed
+            data: { tenantId },
             include: { user: true },
           });
           await tx.student.update({ where: { id: studentId }, data: { parentId: parent.id } });
         }
 
-        // Ensure parent has user
+        // If no user, create one
         if (!parent.user) {
-          const hashed = await bcrypt.hash(parentPassword || "changeme", 10);
-
-          const safeEmail =
-            parentEmail && String(parentEmail).trim()
-              ? String(parentEmail).trim().toLowerCase()
-              : parent_${Date.now()}_${Math.floor(Math.random() * 1000)}@placeholder.local;
-
+          const hashed = await bcrypt.hash(String(parentPassword || "changeme"), 10);
           const user = await tx.user.create({
             data: {
-              name: parentName ? String(parentName).trim() : "Parent",
-              email: safeEmail,
+              name: String(parentName || "Parent").trim(),
               phone: parentPhone ? String(parentPhone).trim() : null,
+              email: parentEmail ? String(parentEmail).trim() : null,
               password: hashed,
               role: "PARENT",
-              tenantId, // ✅ fixed
+              tenantId,
             },
           });
 
@@ -369,25 +322,25 @@ router.put("/:id", authMiddleware, async (req, res) => {
           });
         } else {
           const updateData = {};
+
           if (parentName) updateData.name = String(parentName).trim();
           if (parentPhone !== undefined) updateData.phone = parentPhone ? String(parentPhone).trim() : null;
-          if (parentEmail !== undefined) updateData.email = parentEmail ? String(parentEmail).trim().toLowerCase() : null;
+          if (parentEmail !== undefined) updateData.email = parentEmail ? String(parentEmail).trim() : null;
           if (parentPassword) updateData.password = await bcrypt.hash(String(parentPassword), 10);
 
-          // keep user tenant correct
+          // enforce tenant
           updateData.tenantId = tenantId;
 
-          await tx.user.update({
-            where: { id: parent.user.id },
-            data: updateData,
-          });
+          if (Object.keys(updateData).length) {
+            await tx.user.update({ where: { id: parent.user.id }, data: updateData });
+          }
         }
       }
 
-      return updated;
+      return updatedStudent;
     });
 
-    return res.json({ success: true, message: "Student updated successfully", data: updatedStudent });
+    return res.json({ success: true, message: "Student updated successfully", data: updated });
   } catch (err) {
     return prismaError(res, err, "Failed to update student");
   }
@@ -403,7 +356,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     if (!studentId) return res.status(400).json({ success: false, message: "Invalid student id" });
 
     const student = await prisma.student.findFirst({
-      where: { id: studentId, tenantId }, // ✅ fixed
+      where: { id: studentId, tenantId },
       include: { parent: { include: { user: true } } },
     });
     if (!student) return res.status(404).json({ success: false, message: "Student not found" });
