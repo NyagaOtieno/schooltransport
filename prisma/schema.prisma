@@ -17,12 +17,13 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  buses    Bus[]
-  students Student[]
-  users    User[]
-  assets   Asset[]
-  parents  Parent[]
-  clients  Client[]
+  buses       Bus[]
+  students    Student[]
+  users       User[]
+  assets      Asset[]
+  parents     Parent[]
+  clients     Client[]
+  panicEvents PanicEvent[]
 }
 
 model User {
@@ -33,11 +34,11 @@ model User {
   role     Role
   password String
 
-  tenantId Int?
+  tenantId Int?  // temporary?
   tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  parent   Parent? @relation("UserToParent")
-  client   Client? @relation("UserToClient")
+  parent Parent? @relation("UserToParent")
+  client Client? @relation("UserToClient")
 
   resetOtp          String?
   resetOtpExpiresAt DateTime?
@@ -63,10 +64,10 @@ model User {
 }
 
 model Parent {
-  id        Int      @id @default(autoincrement())
-  tenantId  Int
-  userId    Int?     @unique
-  user      User?    @relation("UserToParent", fields: [userId], references: [id], onDelete: SetNull)
+  id       Int   @id @default(autoincrement())
+  tenantId Int?  // temporary
+  userId   Int?  @unique
+  user     User? @relation("UserToParent", fields: [userId], references: [id], onDelete: SetNull)
 
   students      Student[]
   notifications Notification[]
@@ -78,10 +79,10 @@ model Parent {
 }
 
 model Client {
-  id        Int      @id @default(autoincrement())
-  tenantId  Int
-  userId    Int?     @unique
-  user      User?    @relation("UserToClient", fields: [userId], references: [id], onDelete: SetNull)
+  id       Int   @id @default(autoincrement())
+  tenantId Int?  // temporary
+  userId   Int?  @unique
+  user     User? @relation("UserToClient", fields: [userId], references: [id], onDelete: SetNull)
 
   assets        Asset[]
   notifications Notification[]
@@ -108,7 +109,7 @@ model Bus {
   assistant User? @relation("AssistantBus", fields: [assistantId], references: [id], onDelete: SetNull)
   driver    User? @relation("DriverBus", fields: [driverId], references: [id], onDelete: SetNull)
 
-  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   locations     BusLocation[]
   liveLocations LiveLocation[]
   manifests     Manifest[]
@@ -132,7 +133,7 @@ model Student {
   updatedAt DateTime @updatedAt
 
   bus    Bus    @relation(fields: [busId], references: [id], onDelete: Cascade)
-  tenant  Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   parent Parent? @relation(fields: [parentId], references: [id], onDelete: SetNull)
   user   User?   @relation("UserStudent", fields: [userId], references: [id], onDelete: SetNull)
@@ -162,11 +163,14 @@ model Asset {
   confirmedById Int?
   confirmedBy   User? @relation("AssetConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
 
-  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  bus      Bus?    @relation(fields: [busId], references: [id], onDelete: SetNull)
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  bus    Bus?    @relation(fields: [busId], references: [id], onDelete: SetNull)
 
-  manifests Manifest[]
+  manifests   Manifest[]
+  panicEvents PanicEvent[]
+ 
+
 }
 
 model Manifest {
@@ -195,14 +199,14 @@ model Manifest {
 }
 
 model Notification {
-  id        Int      @id @default(autoincrement())
-  parentId  Int?
-  clientId  Int?
-  title     String
-  message   String
-  type      String
-  sentAt    DateTime @default(now())
-  read      Boolean  @default(false)
+  id       Int      @id @default(autoincrement())
+  parentId Int?
+  clientId Int?
+  title    String
+  message  String
+  type     String
+  sentAt   DateTime @default(now())
+  read     Boolean  @default(false)
 
   parent Parent? @relation(fields: [parentId], references: [id], onDelete: Cascade)
   client Client? @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -242,14 +246,11 @@ model LiveLocation {
 }
 
 model PanicEvent {
-  id          Int         @id @default(autoincrement())
-  userId      Int
-
-  // ✅ allow either a student OR an asset
-  childId     Int?
-  assetId     Int?
-
-  tenantId    Int
+  id       Int  @id @default(autoincrement())
+  userId   Int
+  childId  Int?
+  assetId  Int?
+  tenantId Int?  // temporary
 
   latitude    Float
   longitude   Float
@@ -280,7 +281,6 @@ enum Role {
   CLIENT
   MERCHANT
 }
-
 
 enum ManifestStatus {
   CHECKED_IN
