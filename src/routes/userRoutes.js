@@ -12,11 +12,16 @@ const router = express.Router();
 
 function requireTenant(req, res) {
   const tenantId = req.user?.tenantId;
-  if (!tenantId) {
+  if (tenantId === undefined || tenantId === null || tenantId === "") {
     res.status(403).json({ success: false, message: "Forbidden: token missing tenantId" });
     return null;
   }
-  return Number(tenantId);
+  const n = Number(tenantId);
+  if (!Number.isFinite(n)) {
+    res.status(400).json({ success: false, message: "Invalid tenantId in token" });
+    return null;
+  }
+  return n;
 }
 
 function parseId(raw) {
@@ -34,12 +39,13 @@ function fail(res, code, message, detail) {
 
 // consistent default password
 async function hashPassword(password) {
-  const pwd = (password && String(password).trim()) ? String(password) : "changeme";
+  const pwd = password && String(password).trim() ? String(password) : "changeme";
   return bcrypt.hash(pwd, 10);
 }
 
 /**
  * Keep response safe: never return password fields
+ * ✅ Use correct Prisma field names: tenantId, tenant
  */
 const userSelectSafe = {
   id: true,
@@ -47,11 +53,12 @@ const userSelectSafe = {
   email: true,
   phone: true,
   role: true,
-  TenantId: true,
+  tenantId: true,
   createdAt: true,
   updatedAt: true,
-  Tenant: { select: { id: true, name: true, mode: true, logoUrl: true } },
+  tenant: { select: { id: true, name: true, mode: true, logoUrl: true } },
   parent: { select: { id: true } },
+  client: { select: { id: true } },
 };
 
 /* =========================
@@ -73,7 +80,7 @@ router.get("/", async (req, res) => {
     const role = (req.query.role ?? "").toString().trim().toUpperCase();
 
     const where = {
-      TenantId: tenantId,
+      tenantId,
       ...(role ? { role } : {}),
       ...(q
         ? {
@@ -112,7 +119,7 @@ router.get("/:id", async (req, res) => {
     if (!userId) return fail(res, 400, "Invalid user ID");
 
     const user = await prisma.user.findFirst({
-      where: { id: userId, TenantId: tenantId },
+      where: { id: userId, tenantId },
       select: userSelectSafe,
     });
 
@@ -126,7 +133,7 @@ router.get("/:id", async (req, res) => {
 
 /**
  * POST /api/users
- * Create user (TenantId comes ONLY from token)
+ * Create user (tenantId comes ONLY from token)
  * Body: { name, email, phone, role, password }
  */
 router.post("/", async (req, res) => {
@@ -137,7 +144,7 @@ router.post("/", async (req, res) => {
     const name = (req.body.name ?? "").toString().trim();
     const email = (req.body.email ?? "").toString().trim().toLowerCase();
     const phone = (req.body.phone ?? "").toString().trim() || null;
-    const role = (req.body.role ?? "PARENT").toString().trim().toUpperCase(); // choose your default
+    const role = (req.body.role ?? "PARENT").toString().trim().toUpperCase();
     const password = req.body.password;
 
     if (!name) return fail(res, 400, "name is required");
@@ -146,7 +153,7 @@ router.post("/", async (req, res) => {
     // uniqueness check within tenant
     const conflict = await prisma.user.findFirst({
       where: {
-        TenantId: tenantId,
+        tenantId,
         OR: [
           email ? { email } : undefined,
           phone ? { phone } : undefined,
@@ -166,7 +173,7 @@ router.post("/", async (req, res) => {
         phone,
         role,
         password: await hashPassword(password),
-        TenantId: tenantId,
+        tenantId,
       },
       select: userSelectSafe,
     });
@@ -174,11 +181,8 @@ router.post("/", async (req, res) => {
     return res.status(201).json({ success: true, message: "User created", data: newUser });
   } catch (err) {
     console.error("❌ user create error:", err);
-
-    // Prisma known errors
     if (err?.code === "P2002") return fail(res, 409, "Duplicate key (email/phone) in this tenant");
     if (err?.code === "P2003") return fail(res, 400, "Invalid foreign key value");
-
     return fail(res, 500, "Server error creating user", err?.message);
   }
 });
@@ -186,7 +190,7 @@ router.post("/", async (req, res) => {
 /**
  * PUT /api/users/:id
  * Tenant-scoped update
- * ✅ TenantId cannot be changed from body
+ * ✅ tenantId cannot be changed from body
  */
 router.put("/:id", async (req, res) => {
   try {
@@ -196,10 +200,9 @@ router.put("/:id", async (req, res) => {
     const userId = parseId(req.params.id);
     if (!userId) return fail(res, 400, "Invalid user ID");
 
-    // ensure user belongs to tenant
     const existing = await prisma.user.findFirst({
-      where: { id: userId, TenantId: tenantId },
-      select: { id: true, email: true, phone: true },
+      where: { id: userId, tenantId },
+      select: { id: true },
     });
 
     if (!existing) return fail(res, 404, "User not found");
@@ -217,7 +220,7 @@ router.put("/:id", async (req, res) => {
     if (email || phone) {
       const conflict = await prisma.user.findFirst({
         where: {
-          TenantId: tenantId,
+          tenantId,
           OR: [
             email ? { email } : undefined,
             phone ? { phone } : undefined,
@@ -227,11 +230,14 @@ router.put("/:id", async (req, res) => {
         select: { id: true },
       });
 
-      if (conflict) return fail(res, 409, "Email or phone already exists for another user in this tenant");
+      if (conflict) {
+        return fail(res, 409, "Email or phone already exists for another user in this tenant");
+      }
     }
 
-    // Never allow changing tenant from body
-    const { TenantId: _ignoreTenantId, tenantId: _ignoreTenantId2, schoolId: _ignoreSchoolId, ...rest } = req.body;
+    // Never allow changing tenant from body (ignore any legacy keys)
+    // eslint-disable-next-line no-unused-vars
+    const { TenantId: _A, tenantId: _B, schoolId: _C, ...rest } = req.body;
 
     const updated = await prisma.user.update({
       where: { id: userId },
@@ -242,7 +248,7 @@ router.put("/:id", async (req, res) => {
         ...(phone !== undefined ? { phone } : {}),
         ...(role !== undefined ? { role } : {}),
         ...(password ? { password: await hashPassword(password) } : {}),
-        TenantId: tenantId, // enforce tenant
+        tenantId, // enforce tenant
       },
       select: userSelectSafe,
     });
@@ -250,10 +256,8 @@ router.put("/:id", async (req, res) => {
     return ok(res, { message: "User updated", data: updated });
   } catch (err) {
     console.error("❌ user update error:", err);
-
     if (err?.code === "P2002") return fail(res, 409, "Duplicate key (email/phone) in this tenant");
     if (err?.code === "P2025") return fail(res, 404, "User not found");
-
     return fail(res, 500, "Server error updating user", err?.message);
   }
 });
@@ -261,7 +265,7 @@ router.put("/:id", async (req, res) => {
 /**
  * DELETE /api/users/:id
  * Tenant-scoped
- * - Safely detaches Parent.userId if linked
+ * - Safely detaches Parent.userId / Client.userId if linked
  */
 router.delete("/:id", async (req, res) => {
   try {
@@ -271,21 +275,18 @@ router.delete("/:id", async (req, res) => {
     const userId = parseId(req.params.id);
     if (!userId) return fail(res, 400, "Invalid user ID");
 
-    // ensure user belongs to tenant
     const user = await prisma.user.findFirst({
-      where: { id: userId, TenantId: tenantId },
+      where: { id: userId, tenantId },
       select: { id: true },
     });
 
     if (!user) return fail(res, 404, "User not found");
 
-    // detach from parent if exists
-    await prisma.parent.updateMany({
-      where: { userId: userId },
-      data: { userId: null },
+    await prisma.$transaction(async (tx) => {
+      await tx.parent.updateMany({ where: { userId }, data: { userId: null } });
+      await tx.client.updateMany({ where: { userId }, data: { userId: null } });
+      await tx.user.delete({ where: { id: userId } });
     });
-
-    await prisma.user.delete({ where: { id: userId } });
 
     return ok(res, { message: "User deleted" });
   } catch (err) {
