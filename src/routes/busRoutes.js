@@ -7,10 +7,10 @@ const router = express.Router();
 
 /* =========================
    Helpers
-   ========================= */
+========================= */
 function getTenantId(req, res) {
   const tenantId = req.user?.tenantId;
-  if (!tenantId) {
+  if (tenantId === undefined || tenantId === null || tenantId === "") {
     res.status(403).json({ success: false, message: "Forbidden: token missing tenantId" });
     return null;
   }
@@ -28,7 +28,6 @@ function parseId(v) {
 }
 
 function handlePrismaError(res, err) {
-  // Prisma errors: https://www.prisma.io/docs/orm/reference/error-reference
   if (err?.code === "P2002") {
     return res.status(409).json({ success: false, message: "Bus plate already exists in this tenant" });
   }
@@ -52,34 +51,40 @@ function toIntOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Common include/select
+ * ✅ Correct relation name is tenant (not Tenant)
+ */
+const busInclude = {
+  tenant: { select: { id: true, name: true, mode: true, logoUrl: true } },
+  driver: { select: { id: true, name: true, email: true, phone: true, role: true } },
+  assistant: { select: { id: true, name: true, email: true, phone: true, role: true } },
+};
+
 /* =========================================================
    GET all buses (tenant-scoped)
-   ========================================================= */
+========================================================= */
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const tenantId = getTenantId(req, res);
     if (!tenantId) return;
 
     const buses = await prisma.bus.findMany({
-      where: { TenantId: tenantId },
-      include: {
-        Tenant: { select: { id: true, name: true, mode: true, logoUrl: true } },
-        driver: { select: { id: true, name: true, email: true, phone: true, role: true } },
-        assistant: { select: { id: true, name: true, email: true, phone: true, role: true } },
-      },
+      where: { tenantId },
+      include: busInclude,
       orderBy: { id: "desc" },
     });
 
     return res.json({ success: true, count: buses.length, data: buses });
   } catch (err) {
     console.error("Error fetching buses:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error", detail: err?.message });
   }
 });
 
 /* =========================================================
    GET bus by ID (tenant-scoped)
-   ========================================================= */
+========================================================= */
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const tenantId = getTenantId(req, res);
@@ -89,26 +94,22 @@ router.get("/:id", authMiddleware, async (req, res) => {
     if (!busId) return res.status(400).json({ success: false, message: "Invalid bus id" });
 
     const bus = await prisma.bus.findFirst({
-      where: { id: busId, TenantId: tenantId },
-      include: {
-        Tenant: { select: { id: true, name: true, mode: true, logoUrl: true } },
-        driver: { select: { id: true, name: true, email: true, phone: true, role: true } },
-        assistant: { select: { id: true, name: true, email: true, phone: true, role: true } },
-      },
+      where: { id: busId, tenantId },
+      include: busInclude,
     });
 
     if (!bus) return res.status(404).json({ success: false, message: "Bus not found" });
     return res.json({ success: true, data: bus });
   } catch (err) {
-    console.error(`Error fetching bus ${req.params.id}:`, err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    console.error("Error fetching bus " + req.params.id + ":", err);
+    return res.status(500).json({ success: false, message: "Server error", detail: err?.message });
   }
 });
 
 /* =========================================================
    CREATE bus (tenant-scoped)
-   - Never trust body.TenantId
-   ========================================================= */
+   - Never trust body.tenantId
+========================================================= */
 router.post("/", authMiddleware, async (req, res) => {
   try {
     const tenantId = getTenantId(req, res);
@@ -131,7 +132,7 @@ router.post("/", authMiddleware, async (req, res) => {
     // (Optional) validate driver/assistant belong to same tenant + correct roles
     if (driverId) {
       const driver = await prisma.user.findFirst({
-        where: { id: driverId, TenantId: tenantId, role: "DRIVER" },
+        where: { id: driverId, tenantId, role: "DRIVER" },
         select: { id: true },
       });
       if (!driver) return res.status(400).json({ success: false, message: "Invalid driverId for this tenant" });
@@ -139,7 +140,7 @@ router.post("/", authMiddleware, async (req, res) => {
 
     if (assistantId) {
       const assistant = await prisma.user.findFirst({
-        where: { id: assistantId, TenantId: tenantId, role: "ASSISTANT" },
+        where: { id: assistantId, tenantId, role: "ASSISTANT" },
         select: { id: true },
       });
       if (!assistant) return res.status(400).json({ success: false, message: "Invalid assistantId for this tenant" });
@@ -153,13 +154,9 @@ router.post("/", authMiddleware, async (req, res) => {
         route,
         driverId,
         assistantId,
-        TenantId: tenantId,
+        tenantId,
       },
-      include: {
-        Tenant: { select: { id: true, name: true, mode: true, logoUrl: true } },
-        driver: { select: { id: true, name: true, email: true, phone: true, role: true } },
-        assistant: { select: { id: true, name: true, email: true, phone: true, role: true } },
-      },
+      include: busInclude,
     });
 
     return res.status(201).json({ success: true, message: "Bus created", data: bus });
@@ -167,14 +164,14 @@ router.post("/", authMiddleware, async (req, res) => {
     console.error("Error creating bus:", err);
     const handled = handlePrismaError(res, err);
     if (handled) return;
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error", detail: err?.message });
   }
 });
 
 /* =========================================================
    UPDATE bus (tenant-scoped)
-   - Never allow changing TenantId
-   ========================================================= */
+   - Never allow changing tenantId
+========================================================= */
 router.put("/:id", authMiddleware, async (req, res) => {
   try {
     const tenantId = getTenantId(req, res);
@@ -185,16 +182,17 @@ router.put("/:id", authMiddleware, async (req, res) => {
 
     // Ensure bus belongs to tenant
     const existing = await prisma.bus.findFirst({
-      where: { id: busId, TenantId: tenantId },
+      where: { id: busId, tenantId },
       select: { id: true },
     });
     if (!existing) return res.status(404).json({ success: false, message: "Bus not found" });
 
-    // Never accept TenantId changes
-    const { TenantId: _ignore1, tenantId: _ignore2, ...body } = req.body || {};
+    // Never accept tenantId changes (ignore any legacy keys)
+    // eslint-disable-next-line no-unused-vars
+    const { TenantId: _ignore1, tenantId: _ignore2, schoolId: _ignore3, ...body } = req.body || {};
 
-    // Normalize fields
     const data = {};
+
     if (body.name !== undefined) data.name = safeString(body.name);
     if (body.plateNumber !== undefined) data.plateNumber = safeString(body.plateNumber);
     if (body.route !== undefined) data.route = safeString(body.route);
@@ -206,7 +204,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
     // validate driver/assistant role + tenant if provided
     if (data.driverId) {
       const driver = await prisma.user.findFirst({
-        where: { id: data.driverId, TenantId: tenantId, role: "DRIVER" },
+        where: { id: data.driverId, tenantId, role: "DRIVER" },
         select: { id: true },
       });
       if (!driver) return res.status(400).json({ success: false, message: "Invalid driverId for this tenant" });
@@ -214,37 +212,33 @@ router.put("/:id", authMiddleware, async (req, res) => {
 
     if (data.assistantId) {
       const assistant = await prisma.user.findFirst({
-        where: { id: data.assistantId, TenantId: tenantId, role: "ASSISTANT" },
+        where: { id: data.assistantId, tenantId, role: "ASSISTANT" },
         select: { id: true },
       });
       if (!assistant) return res.status(400).json({ success: false, message: "Invalid assistantId for this tenant" });
     }
 
-    // enforce tenant
-    data.TenantId = tenantId;
+    // enforce tenant safety
+    data.tenantId = tenantId;
 
     const bus = await prisma.bus.update({
       where: { id: busId },
       data,
-      include: {
-        Tenant: { select: { id: true, name: true, mode: true, logoUrl: true } },
-        driver: { select: { id: true, name: true, email: true, phone: true, role: true } },
-        assistant: { select: { id: true, name: true, email: true, phone: true, role: true } },
-      },
+      include: busInclude,
     });
 
     return res.json({ success: true, message: "Bus updated", data: bus });
   } catch (err) {
-    console.error(`Error updating bus ${req.params.id}:`, err);
+    console.error("Error updating bus " + req.params.id + ":", err); 
     const handled = handlePrismaError(res, err);
     if (handled) return;
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error", detail: err?.message });
   }
 });
 
 /* =========================================================
    DELETE bus (tenant-scoped)
-   ========================================================= */
+========================================================= */
 router.delete("/:id", authMiddleware, async (req, res) => {
   try {
     const tenantId = getTenantId(req, res);
@@ -253,14 +247,12 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     const busId = parseId(req.params.id);
     if (!busId) return res.status(400).json({ success: false, message: "Invalid bus id" });
 
-    // Ensure belongs to tenant
     const existing = await prisma.bus.findFirst({
-      where: { id: busId, TenantId: tenantId },
+      where: { id: busId, tenantId },
       select: { id: true },
     });
     if (!existing) return res.status(404).json({ success: false, message: "Bus not found" });
 
-    // Optional: clean up assignment (not required if you rely on FK behavior)
     const deleted = await prisma.bus.delete({
       where: { id: busId },
       select: { id: true, name: true, plateNumber: true },
@@ -268,10 +260,10 @@ router.delete("/:id", authMiddleware, async (req, res) => {
 
     return res.json({ success: true, message: "Bus deleted", data: deleted });
   } catch (err) {
-    console.error(`Error deleting bus ${req.params.id}:`, err);
+    console.error("Error deleting bus " + req.params.id + ":", err);
     const handled = handlePrismaError(res, err);
     if (handled) return;
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error", detail: err?.message });
   }
 });
 
