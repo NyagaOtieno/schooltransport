@@ -8,7 +8,7 @@ const router = express.Router();
 
 /* =========================
    Helpers
-   ========================= */
+========================= */
 function requireTenant(req, res) {
   const tenantId = req.user?.tenantId;
   if (!tenantId) {
@@ -60,18 +60,16 @@ function todayRange() {
 }
 
 /* =========================================================
-   GET all manifests (tenant scoped)
+   GET all manifests (tenant scoped via bus.tenantId)
    ========================================================= */
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const tenantId = requireTenant(req, res);
     if (!tenantId) return;
 
-    // IMPORTANT: Manifest has no TenantId column in your schema,
-    // so we scope via bus -> TenantId, plus (student/asset) are also tenant-scoped.
     const manifests = await prisma.manifest.findMany({
       where: {
-        bus: { TenantId: tenantId },
+        bus: { tenantId }, // ✅ FIXED
       },
       include: {
         student: true,
@@ -85,12 +83,12 @@ router.get("/", authMiddleware, async (req, res) => {
     return res.status(200).json({ success: true, count: manifests.length, data: manifests });
   } catch (error) {
     console.error("Error fetching manifests:", error);
-    return res.status(500).json({ success: false, message: "Server error fetching manifests" });
+    return res.status(500).json({ success: false, message: "Server error fetching manifests", detail: error?.message });
   }
 });
 
 /* =========================================================
-   GET manifest by ID (tenant scoped)
+   GET manifest by ID (tenant scoped via bus.tenantId)
    ========================================================= */
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
@@ -103,7 +101,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
     const manifest = await prisma.manifest.findFirst({
       where: {
         id,
-        bus: { TenantId: tenantId },
+        bus: { tenantId }, // ✅ FIXED
       },
       include: {
         student: true,
@@ -117,7 +115,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
     return res.status(200).json({ success: true, data: manifest });
   } catch (error) {
     console.error("Error fetching manifest:", error);
-    return res.status(500).json({ success: false, message: "Server error fetching manifest" });
+    return res.status(500).json({ success: false, message: "Server error fetching manifest", detail: error?.message });
   }
 });
 
@@ -151,14 +149,14 @@ router.post("/", authMiddleware, async (req, res) => {
 
     // ✅ Validate bus belongs to tenant
     const bus = await prisma.bus.findFirst({
-      where: { id: busIdNum, TenantId: tenantId },
+      where: { id: busIdNum, tenantId }, // ✅ FIXED
       select: { id: true, plateNumber: true, assistantId: true },
     });
     if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this tenant" });
 
     // ✅ Validate assistant belongs to tenant + role
     const assistant = await prisma.user.findFirst({
-      where: { id: assistantIdNum, TenantId: tenantId, role: "ASSISTANT" },
+      where: { id: assistantIdNum, tenantId, role: "ASSISTANT" }, // ✅ FIXED
       select: { id: true, name: true },
     });
     if (!assistant) return res.status(400).json({ success: false, message: "Assistant not found for this tenant" });
@@ -200,24 +198,24 @@ router.post("/", authMiddleware, async (req, res) => {
 
     if (studentId) {
       subject = await prisma.student.findFirst({
-        where: { id: Number(studentId), TenantId: tenantId },
+        where: { id: Number(studentId), tenantId }, // ✅ FIXED
         include: {
           parent: { include: { user: true } },
-          Tenant: { select: { mode: true } },
+          tenant: { select: { mode: true } }, // ✅ FIXED
         },
       });
       if (!subject) return res.status(404).json({ success: false, message: "Student not found" });
-      mode = subject.Tenant?.mode || "KID";
+      mode = subject.tenant?.mode || "KID";
     } else {
       subject = await prisma.asset.findFirst({
-        where: { id: Number(assetId), TenantId: tenantId },
+        where: { id: Number(assetId), tenantId }, // ✅ FIXED
         include: {
-          parent: { include: { user: true } },
-          Tenant: { select: { mode: true } },
+          client: { include: { user: true } }, // ✅ FIX: Asset links to client in your schema
+          tenant: { select: { mode: true } },  // ✅ FIXED
         },
       });
       if (!subject) return res.status(404).json({ success: false, message: "Asset not found" });
-      mode = subject.Tenant?.mode || "ASSET";
+      mode = subject.tenant?.mode || "ASSET";
     }
 
     const now = new Date();
@@ -243,9 +241,16 @@ router.post("/", authMiddleware, async (req, res) => {
       },
     });
 
-    // 🔔 Send SMS notification (recipient = parent.user for both kid/asset modes)
+    // 🔔 Send SMS notification (recipient = parent.user for KID, client.user for ASSET)
     try {
-      const recipientUser = subject?.parent?.user;
+      let recipientUser = null;
+
+      if (studentId) {
+        recipientUser = subject?.parent?.user;
+      } else {
+        recipientUser = subject?.client?.user; // ✅ FIXED for ASSET mode
+      }
+
       const recipientPhone = recipientUser?.phone;
       const recipientName = (recipientUser?.name || "Recipient").split(" ")[0];
       const subjectName = subject?.name || "Item";
@@ -295,7 +300,7 @@ router.post("/", authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating manifest:", error);
-    return res.status(500).json({ success: false, message: "Server error creating manifest" });
+    return res.status(500).json({ success: false, message: "Server error creating manifest", detail: error?.message });
   }
 });
 
@@ -312,7 +317,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
 
     // ensure it belongs to tenant via bus
     const existing = await prisma.manifest.findFirst({
-      where: { id, bus: { TenantId: tenantId } },
+      where: { id, bus: { tenantId } }, // ✅ FIXED
       select: { id: true },
     });
     if (!existing) return res.status(404).json({ success: false, message: "Manifest not found" });
@@ -335,7 +340,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
       if (!busIdNum) return res.status(400).json({ success: false, message: "Invalid busId" });
 
       const bus = await prisma.bus.findFirst({
-        where: { id: busIdNum, TenantId: tenantId },
+        where: { id: busIdNum, tenantId }, // ✅ FIXED
         select: { id: true },
       });
       if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this tenant" });
@@ -351,7 +356,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
     return res.status(200).json({ success: true, message: "Manifest updated successfully", data: updated });
   } catch (error) {
     console.error("Error updating manifest:", error);
-    return res.status(500).json({ success: false, message: "Server error updating manifest" });
+    return res.status(500).json({ success: false, message: "Server error updating manifest", detail: error?.message });
   }
 });
 
@@ -368,7 +373,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
 
     // ensure it belongs to tenant
     const existing = await prisma.manifest.findFirst({
-      where: { id, bus: { TenantId: tenantId } },
+      where: { id, bus: { tenantId } }, // ✅ FIXED
       select: { id: true },
     });
     if (!existing) return res.status(404).json({ success: false, message: "Manifest not found" });
@@ -377,7 +382,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     return res.status(200).json({ success: true, message: "Manifest deleted successfully" });
   } catch (error) {
     console.error("Error deleting manifest:", error);
-    return res.status(500).json({ success: false, message: "Server error deleting manifest" });
+    return res.status(500).json({ success: false, message: "Server error deleting manifest", detail: error?.message });
   }
 });
 
