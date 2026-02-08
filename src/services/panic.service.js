@@ -27,9 +27,10 @@ export async function createPanicEvent({
 
   if (!childId) throw new Error("childId is required");
 
-  const safeRole = ["ADMIN", "DRIVER", "ASSISTANT", "PARENT"].includes(role)
-    ? role
-    : "PARENT";
+  const safeRole = ["ADMIN","DRIVER","ASSISTANT","PARENT","CLIENT","MERCHANT"].includes(role)
+  ? role
+  : "PARENT";
+
 
   // 1) Cooldown check
   const recentPanic = await prisma.panicEvent.findFirst({

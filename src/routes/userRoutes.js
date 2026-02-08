@@ -1,146 +1,297 @@
+// src/routes/userRoutes.js
 import express from "express";
 import prisma from "../middleware/prisma.js";
 import bcrypt from "bcryptjs";
+import { authMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// -----------------------------
-// Get all users
-// -----------------------------
+/* =========================
+   Helpers
+========================= */
+
+function requireTenant(req, res) {
+  const tenantId = req.user?.tenantId;
+  if (!tenantId) {
+    res.status(403).json({ success: false, message: "Forbidden: token missing tenantId" });
+    return null;
+  }
+  return Number(tenantId);
+}
+
+function parseId(raw) {
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function ok(res, payload) {
+  return res.status(200).json({ success: true, ...payload });
+}
+
+function fail(res, code, message, detail) {
+  return res.status(code).json({ success: false, message, ...(detail ? { detail } : {}) });
+}
+
+// consistent default password
+async function hashPassword(password) {
+  const pwd = (password && String(password).trim()) ? String(password) : "changeme";
+  return bcrypt.hash(pwd, 10);
+}
+
+/**
+ * Keep response safe: never return password fields
+ */
+const userSelectSafe = {
+  id: true,
+  name: true,
+  email: true,
+  phone: true,
+  role: true,
+  TenantId: true,
+  createdAt: true,
+  updatedAt: true,
+  Tenant: { select: { id: true, name: true, mode: true, logoUrl: true } },
+  parent: { select: { id: true } },
+};
+
+/* =========================
+   Routes (JWT required)
+========================= */
+
+router.use(authMiddleware);
+
+/**
+ * GET /api/users
+ * Tenant-scoped list (supports ?q= search + ?role= filter)
+ */
 router.get("/", async (req, res) => {
   try {
-    const users = await prisma.user.findMany({ include: { school: true } });
-    res.json(users);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Server error" });
+    const tenantId = requireTenant(req, res);
+    if (!tenantId) return;
+
+    const q = (req.query.q ?? "").toString().trim();
+    const role = (req.query.role ?? "").toString().trim().toUpperCase();
+
+    const where = {
+      TenantId: tenantId,
+      ...(role ? { role } : {}),
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: "insensitive" } },
+              { email: { contains: q, mode: "insensitive" } },
+              { phone: { contains: q, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    };
+
+    const users = await prisma.user.findMany({
+      where,
+      select: userSelectSafe,
+      orderBy: { createdAt: "desc" },
+    });
+
+    return ok(res, { count: users.length, data: users });
+  } catch (err) {
+    console.error("❌ users list error:", err);
+    return fail(res, 500, "Server error fetching users", err?.message);
   }
 });
 
-// -----------------------------
-// Get user by ID
-// -----------------------------
+/**
+ * GET /api/users/:id
+ * Tenant-scoped
+ */
 router.get("/:id", async (req, res) => {
   try {
-    const userId = Number(req.params.id);
-    if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
+    const tenantId = requireTenant(req, res);
+    if (!tenantId) return;
 
-    const user = await prisma.user.findUnique({ where: { id: userId }, include: { school: true } });
-    if (!user) return res.status(404).json({ error: "User not found" });
-    res.json(user);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Server error" });
+    const userId = parseId(req.params.id);
+    if (!userId) return fail(res, 400, "Invalid user ID");
+
+    const user = await prisma.user.findFirst({
+      where: { id: userId, TenantId: tenantId },
+      select: userSelectSafe,
+    });
+
+    if (!user) return fail(res, 404, "User not found");
+    return ok(res, { data: user });
+  } catch (err) {
+    console.error("❌ user get error:", err);
+    return fail(res, 500, "Server error fetching user", err?.message);
   }
 });
 
-// -----------------------------
-// Create user
-// -----------------------------
+/**
+ * POST /api/users
+ * Create user (TenantId comes ONLY from token)
+ * Body: { name, email, phone, role, password }
+ */
 router.post("/", async (req, res) => {
   try {
-    const { name, email, phone, schoolId, role, password } = req.body;
+    const tenantId = requireTenant(req, res);
+    if (!tenantId) return;
 
-    if (!schoolId || (!email && !phone)) {
-      return res.status(400).json({ error: "Email or phone and schoolId are required" });
-    }
+    const name = (req.body.name ?? "").toString().trim();
+    const email = (req.body.email ?? "").toString().trim().toLowerCase();
+    const phone = (req.body.phone ?? "").toString().trim() || null;
+    const role = (req.body.role ?? "PARENT").toString().trim().toUpperCase(); // choose your default
+    const password = req.body.password;
 
-    // Check for existing user in same school
-    const existingUser = await prisma.user.findFirst({
+    if (!name) return fail(res, 400, "name is required");
+    if (!email && !phone) return fail(res, 400, "Provide at least email or phone");
+
+    // uniqueness check within tenant
+    const conflict = await prisma.user.findFirst({
       where: {
-        schoolId,
+        TenantId: tenantId,
         OR: [
           email ? { email } : undefined,
-          phone ? { phone } : undefined
+          phone ? { phone } : undefined,
         ].filter(Boolean),
       },
+      select: { id: true },
     });
 
-    if (existingUser) {
-      return res.status(409).json({
-        error: "Email or phone already exists for this school. You can only update the existing user."
-      });
+    if (conflict) {
+      return fail(res, 409, "Email or phone already exists for this tenant");
     }
 
-    // Hash password if provided
-    const hashedPassword = password ? await bcrypt.hash(password, 10) : await bcrypt.hash("changeme", 10);
-
     const newUser = await prisma.user.create({
-      data: { name, email, phone, schoolId, role: role || "USER", password: hashedPassword },
+      data: {
+        name,
+        email: email || null,
+        phone,
+        role,
+        password: await hashPassword(password),
+        TenantId: tenantId,
+      },
+      select: userSelectSafe,
     });
 
-    res.status(201).json(newUser);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Server error" });
+    return res.status(201).json({ success: true, message: "User created", data: newUser });
+  } catch (err) {
+    console.error("❌ user create error:", err);
+
+    // Prisma known errors
+    if (err?.code === "P2002") return fail(res, 409, "Duplicate key (email/phone) in this tenant");
+    if (err?.code === "P2003") return fail(res, 400, "Invalid foreign key value");
+
+    return fail(res, 500, "Server error creating user", err?.message);
   }
 });
 
-// -----------------------------
-// Update user
-// -----------------------------
+/**
+ * PUT /api/users/:id
+ * Tenant-scoped update
+ * ✅ TenantId cannot be changed from body
+ */
 router.put("/:id", async (req, res) => {
   try {
-    const userId = Number(req.params.id);
-    if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
+    const tenantId = requireTenant(req, res);
+    if (!tenantId) return;
 
-    const { email, phone, schoolId, password, name, role } = req.body;
+    const userId = parseId(req.params.id);
+    if (!userId) return fail(res, 400, "Invalid user ID");
 
-    // Check for conflicts in same school
-    if ((email || phone) && schoolId) {
-      const conflictUser = await prisma.user.findFirst({
+    // ensure user belongs to tenant
+    const existing = await prisma.user.findFirst({
+      where: { id: userId, TenantId: tenantId },
+      select: { id: true, email: true, phone: true },
+    });
+
+    if (!existing) return fail(res, 404, "User not found");
+
+    const name = req.body.name !== undefined ? String(req.body.name).trim() : undefined;
+    const email =
+      req.body.email !== undefined ? String(req.body.email).trim().toLowerCase() : undefined;
+    const phone =
+      req.body.phone !== undefined ? (String(req.body.phone).trim() || null) : undefined;
+    const role =
+      req.body.role !== undefined ? String(req.body.role).trim().toUpperCase() : undefined;
+    const password = req.body.password;
+
+    // check uniqueness (if email/phone changes)
+    if (email || phone) {
+      const conflict = await prisma.user.findFirst({
         where: {
-          schoolId,
+          TenantId: tenantId,
           OR: [
             email ? { email } : undefined,
-            phone ? { phone } : undefined
+            phone ? { phone } : undefined,
           ].filter(Boolean),
           NOT: { id: userId },
         },
+        select: { id: true },
       });
-      if (conflictUser) {
-        return res.status(409).json({ error: "Email or phone already exists for another user in this school." });
-      }
+
+      if (conflict) return fail(res, 409, "Email or phone already exists for another user in this tenant");
     }
 
-    const updatedUser = await prisma.user.update({
+    // Never allow changing tenant from body
+    const { TenantId: _ignoreTenantId, tenantId: _ignoreTenantId2, schoolId: _ignoreSchoolId, ...rest } = req.body;
+
+    const updated = await prisma.user.update({
       where: { id: userId },
       data: {
-        name,
-        email,
-        phone,
-        schoolId,
-        role,
-        password: password ? await bcrypt.hash(password, 10) : undefined
+        ...rest,
+        ...(name !== undefined ? { name } : {}),
+        ...(email !== undefined ? { email } : {}),
+        ...(phone !== undefined ? { phone } : {}),
+        ...(role !== undefined ? { role } : {}),
+        ...(password ? { password: await hashPassword(password) } : {}),
+        TenantId: tenantId, // enforce tenant
       },
+      select: userSelectSafe,
     });
 
-    res.json(updatedUser);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Server error" });
+    return ok(res, { message: "User updated", data: updated });
+  } catch (err) {
+    console.error("❌ user update error:", err);
+
+    if (err?.code === "P2002") return fail(res, 409, "Duplicate key (email/phone) in this tenant");
+    if (err?.code === "P2025") return fail(res, 404, "User not found");
+
+    return fail(res, 500, "Server error updating user", err?.message);
   }
 });
 
-// -----------------------------
-// Delete user
-// -----------------------------
+/**
+ * DELETE /api/users/:id
+ * Tenant-scoped
+ * - Safely detaches Parent.userId if linked
+ */
 router.delete("/:id", async (req, res) => {
   try {
-    const userId = Number(req.params.id);
-    if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
+    const tenantId = requireTenant(req, res);
+    if (!tenantId) return;
 
-    // Remove parent linkage if exists
-    const parent = await prisma.parent.findFirst({ where: { userId } });
-    if (parent) {
-      await prisma.parent.update({ where: { id: parent.id }, data: { userId: null } });
-    }
+    const userId = parseId(req.params.id);
+    if (!userId) return fail(res, 400, "Invalid user ID");
 
-    const deletedUser = await prisma.user.delete({ where: { id: userId } });
-    res.json(deletedUser);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Server error" });
+    // ensure user belongs to tenant
+    const user = await prisma.user.findFirst({
+      where: { id: userId, TenantId: tenantId },
+      select: { id: true },
+    });
+
+    if (!user) return fail(res, 404, "User not found");
+
+    // detach from parent if exists
+    await prisma.parent.updateMany({
+      where: { userId: userId },
+      data: { userId: null },
+    });
+
+    await prisma.user.delete({ where: { id: userId } });
+
+    return ok(res, { message: "User deleted" });
+  } catch (err) {
+    console.error("❌ user delete error:", err);
+    if (err?.code === "P2025") return fail(res, 404, "User not found");
+    return fail(res, 500, "Server error deleting user", err?.message);
   }
 });
 

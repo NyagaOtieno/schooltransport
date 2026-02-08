@@ -15,30 +15,75 @@ function isStrongPassword(password) {
   );
 }
 
+// ✅ Allow these roles
+const ALLOWED_ROLES = ["ADMIN", "DRIVER", "ASSISTANT", "PARENT", "CLIENT", "MERCHANT"];
+
+// ✅ Resolve tenantId from incoming body (backward compatible with schoolId)
+function resolveTenantId(body) {
+  const tenantId = body.tenantId ?? body.TenantId ?? body.schoolId;
+  return tenantId !== undefined && tenantId !== null && tenantId !== "" ? Number(tenantId) : null;
+}
+
+// ✅ Create JWT payload consistently
+function signToken(user) {
+  const tenantId =
+    user.TenantId ?? user.tenantId ?? user.schoolId ?? null; // backward compatibility
+
+  return jwt.sign(
+    {
+      userId: user.id,
+      role: String(user.role).toUpperCase(),
+      tenantId: tenantId !== null && tenantId !== undefined ? Number(tenantId) : null,
+
+      // optional backward compatibility
+      schoolId: tenantId !== null && tenantId !== undefined ? Number(tenantId) : null,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+}
+
 // -----------------------------
 // Register user
 // -----------------------------
 export const register = async (req, res) => {
   try {
-    const { name, email, phone, password, role, schoolId } = req.body;
+    const { name, email, phone, password } = req.body;
+    const roleRaw = req.body.role;
+    const role = roleRaw ? String(roleRaw).toUpperCase() : null;
 
-    if (!name || !email || !password || !role || !schoolId) {
-      return res
-        .status(400)
-        .json({ error: "All required fields must be provided" });
+    // ✅ tenantId replaces schoolId (but we accept schoolId as fallback)
+    const tenantId = resolveTenantId(req.body);
+
+    if (!name || !email || !password || !role || !tenantId) {
+      return res.status(400).json({
+        error: "name, email, password, role, and tenantId are required",
+      });
     }
 
-    // Check for existing user in same school
+    if (!ALLOWED_ROLES.includes(role)) {
+      return res.status(400).json({
+        error: `Invalid role. Allowed: ${ALLOWED_ROLES.join(", ")}`,
+      });
+    }
+
+    // ✅ Confirm tenant exists
+    const tenant = await prisma.tenant.findUnique({ where: { id: Number(tenantId) } });
+    if (!tenant) {
+      return res.status(400).json({ error: "Tenant does not exist" });
+    }
+
+    // ✅ Check for existing user in same tenant
     const existingUser = await prisma.user.findFirst({
       where: {
-        schoolId: Number(schoolId),
+        TenantId: Number(tenantId), // 👈 matches your schema
         OR: [{ email }, ...(phone ? [{ phone }] : [])],
       },
     });
 
     if (existingUser) {
       return res.status(409).json({
-        error: "Email or phone already exists for this school",
+        error: "Email or phone already exists for this tenant",
       });
     }
 
@@ -52,25 +97,14 @@ export const register = async (req, res) => {
         phone: phone || null,
         password: hashedPassword,
         role,
-        schoolId: Number(schoolId),
+        TenantId: Number(tenantId),
       },
     });
-   console.log("LOGIN USER =>", { id: user.id, role: user.role, schoolId: user.schoolId });
 
-    // ✅ Optional: issue token immediately on registration
-    const token = jwt.sign(
-      {
-        userId: user.id,
-        role: user.role,
-        schoolId: user.schoolId,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "1d" }
-    );
-
+    const token = signToken(user);
     const { password: _, ...userWithoutPassword } = user;
 
-    res.status(201).json({
+    return res.status(201).json({
       message: "User registered successfully",
       token,
       user: userWithoutPassword,
@@ -78,7 +112,7 @@ export const register = async (req, res) => {
     });
   } catch (error) {
     console.error("REGISTER ERROR:", error);
-    res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
@@ -89,33 +123,49 @@ export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    // Optional: allow tenantId for unambiguous login (recommended)
+    const tenantId = resolveTenantId(req.body);
+
     if (!email || !password) {
-      return res
-        .status(400)
-        .json({ error: "Email and password are required" });
+      return res.status(400).json({ error: "Email and password are required" });
     }
 
-    // Support multiple schools: findFirst
-    const user = await prisma.user.findFirst({ where: { email } });
+    // ✅ If tenantId is provided, login is scoped properly
+    // ✅ If not provided, we attempt findFirst by email; if multiple tenants share same email -> error
+    let user = null;
+
+    if (tenantId) {
+      user = await prisma.user.findFirst({
+        where: { email, TenantId: Number(tenantId) },
+      });
+    } else {
+      const matches = await prisma.user.findMany({
+        where: { email },
+        select: { id: true, TenantId: true, password: true, role: true, name: true, email: true, phone: true },
+      });
+
+      if (matches.length > 1) {
+        return res.status(409).json({
+          error: "This email exists in multiple tenants. Provide tenantId to login.",
+        });
+      }
+
+      user = matches[0] || null;
+      // If we selected limited fields above, fetch full user
+      if (user?.id) {
+        user = await prisma.user.findUnique({ where: { id: user.id } });
+      }
+    }
+
     if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: "Invalid credentials" });
 
-    // ✅ Include schoolId in token (this fixes your Forbidden error)
-    const token = jwt.sign(
-      {
-        userId: user.id,
-        role: user.role,
-        schoolId: user.schoolId, // ✅ ADD THIS
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
+    const token = signToken(user);
     const { password: _, ...userWithoutPassword } = user;
 
-    res.json({
+    return res.json({
       message: "Login successful",
       token,
       user: userWithoutPassword,
@@ -123,28 +173,35 @@ export const login = async (req, res) => {
     });
   } catch (error) {
     console.error("LOGIN ERROR:", error);
-    res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
 // -----------------------------
 // Forgot Password (Send OTP)
+// ✅ Supports email OR phone (your frontend uses phone)
 // -----------------------------
 export const forgotPassword = async (req, res) => {
   try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: "Email is required" });
+    const { email, phone } = req.body;
+    if (!email && !phone) return res.status(400).json({ error: "Email or phone is required" });
 
-    const user = await prisma.user.findFirst({ where: { email } });
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          email ? { email } : undefined,
+          phone ? { phone } : undefined,
+        ].filter(Boolean),
+      },
+    });
+
     if (!user) return res.status(404).json({ error: "User not found" });
 
     // OTP resend cooldown: 60s
     if (user.resetOtpSentAt) {
       const diff = Date.now() - new Date(user.resetOtpSentAt).getTime();
       if (diff < 60 * 1000) {
-        return res
-          .status(429)
-          .json({ error: "Please wait before requesting another OTP" });
+        return res.status(429).json({ error: "Please wait before requesting another OTP" });
       }
     }
 
@@ -159,36 +216,49 @@ export const forgotPassword = async (req, res) => {
       },
     });
 
-    await sendResetOtpEmail(email, otp);
+    // ✅ You currently send OTP via email service
+    // If phone-only users exist, you should also add an SMS sender here.
+    if (!user.email) {
+      return res.status(400).json({
+        error: "This account has no email. Add SMS OTP sending or store email for this user.",
+      });
+    }
 
-    res.json({ success: true, message: "OTP sent to email" });
+    await sendResetOtpEmail(user.email, otp);
+    return res.json({ success: true, message: "OTP sent" });
   } catch (err) {
     console.error("FORGOT PASSWORD ERROR:", err);
-    res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
 // -----------------------------
 // Reset Password (Verify OTP)
+// ✅ Supports email OR phone
 // -----------------------------
 export const resetPassword = async (req, res) => {
   try {
-    const { email, otp, newPassword } = req.body;
+    const { email, phone, otp, newPassword } = req.body;
 
-    if (!email || !otp || !newPassword) {
-      return res
-        .status(400)
-        .json({ error: "Email, OTP, and new password are required" });
+    if ((!email && !phone) || !otp || !newPassword) {
+      return res.status(400).json({ error: "email/phone, OTP, and newPassword are required" });
     }
 
     if (!isStrongPassword(newPassword)) {
       return res.status(400).json({
-        error:
-          "Password must be at least 8 characters and include uppercase, lowercase, and a number",
+        error: "Password must be at least 8 characters and include uppercase, lowercase, and a number",
       });
     }
 
-    const user = await prisma.user.findFirst({ where: { email } });
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          email ? { email } : undefined,
+          phone ? { phone } : undefined,
+        ].filter(Boolean),
+      },
+    });
+
     if (!user || !user.resetOtp || !user.resetOtpExpiresAt) {
       return res.status(400).json({ error: "Invalid reset request" });
     }
@@ -210,13 +280,9 @@ export const resetPassword = async (req, res) => {
       },
     });
 
-    console.log(
-      `Password reset successful for userId=${user.id} email=${user.email} at ${new Date().toISOString()}`
-    );
-
-    res.json({ success: true, message: "Password reset successful" });
+    return res.json({ success: true, message: "Password reset successful" });
   } catch (err) {
     console.error("RESET PASSWORD ERROR:", err);
-    res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };

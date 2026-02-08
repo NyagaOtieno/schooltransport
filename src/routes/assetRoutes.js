@@ -5,112 +5,190 @@ import { authMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
 
-/**
- * Helper: require schoolId from token
- */
-function requireSchool(req, res) {
-  const schoolId = req.user?.schoolId;
-  if (!schoolId) {
-    res.status(403).json({ success: false, message: "Forbidden: token missing schoolId" });
+/* =========================
+   Helpers
+   ========================= */
+
+function getTenantId(req, res) {
+  const tenantId = req.user?.tenantId;
+  if (!tenantId) {
+    res.status(403).json({ success: false, message: "Forbidden: token missing tenantId" });
     return null;
   }
-  return Number(schoolId);
+  const n = Number(tenantId);
+  if (!Number.isFinite(n)) {
+    res.status(400).json({ success: false, message: "Invalid tenantId in token" });
+    return null;
+  }
+  return n;
+}
+
+function handleError(res, error, message = "Server error") {
+  console.error(message + ":", error);
+  return res.status(500).json({ success: false, message });
+}
+
+function toManifestStatus(status) {
+  if (!status) return null;
+  const s = String(status).trim().toLowerCase();
+
+  if (["checked_in", "onboard", "onboarded", "checkin", "in"].includes(s)) return "CHECKED_IN";
+  if (["checked_out", "offboard", "offboarded", "checkout", "out"].includes(s)) return "CHECKED_OUT";
+
+  const upper = String(status).trim().toUpperCase();
+  if (["CHECKED_IN", "CHECKED_OUT"].includes(upper)) return upper;
+
+  return null;
+}
+
+function getSessionValue(session) {
+  if (session && ["MORNING", "EVENING"].includes(String(session).toUpperCase())) {
+    return String(session).toUpperCase();
+  }
+  const h = new Date().getHours();
+  return h < 12 ? "MORNING" : "EVENING";
+}
+
+async function findAssetByTag({ tag, tenantId }) {
+  return prisma.asset.findFirst({
+    where: {
+      tag: String(tag).trim(),
+      TenantId: tenantId,
+    },
+    include: {
+      parent: { include: { user: true } },
+      bus: true,
+      Tenant: true,
+    },
+  });
 }
 
 /* =========================================================
    ✅ ASSET TRACKING (AUTH REQUIRED)
    ========================================================= */
 
-// ✅ GET asset by TAG (scoped by token schoolId)
+// ✅ GET asset by TAG (scoped by token tenantId)
 router.get("/tag/:tag", authMiddleware, async (req, res) => {
   try {
-    const schoolId = requireSchool(req, res);
-    if (!schoolId) return;
+    const tenantId = getTenantId(req, res);
+    if (!tenantId) return;
 
-    const tag = req.params.tag;
+    const tag = String(req.params.tag || "").trim();
+    if (!tag) return res.status(400).json({ success: false, message: "Tag is required" });
 
-    const asset = await prisma.asset.findFirst({
-      where: { tag, schoolId },
-      include: {
-        parent: { include: { user: true } },
-        bus: true,
-        school: true,
-      },
-    });
-
+    const asset = await findAssetByTag({ tag, tenantId });
     if (!asset) return res.status(404).json({ success: false, message: "Asset not found" });
 
-    res.status(200).json({ success: true, data: asset });
+    return res.status(200).json({ success: true, data: asset });
   } catch (error) {
-    console.error("Error fetching asset by tag:", error);
-    res.status(500).json({ success: false, message: "Server error fetching asset" });
+    return handleError(res, error, "Server error fetching asset");
   }
 });
 
 // ✅ GET manifest history for asset TAG (scoped)
 router.get("/tag/:tag/manifests", authMiddleware, async (req, res) => {
   try {
-    const schoolId = requireSchool(req, res);
-    if (!schoolId) return;
+    const tenantId = getTenantId(req, res);
+    if (!tenantId) return;
 
-    const tag = req.params.tag;
+    const tag = String(req.params.tag || "").trim();
+    if (!tag) return res.status(400).json({ success: false, message: "Tag is required" });
 
     const asset = await prisma.asset.findFirst({
-      where: { tag, schoolId },
+      where: { tag, TenantId: tenantId },
       select: { id: true },
     });
-
     if (!asset) return res.status(404).json({ success: false, message: "Asset not found" });
 
     const manifests = await prisma.manifest.findMany({
       where: { assetId: asset.id },
-      include: {
-        bus: true,
-        assistant: true,
-        asset: true,
-      },
+      include: { bus: true, assistant: true, asset: true },
       orderBy: { createdAt: "desc" },
     });
 
-    res.status(200).json({ success: true, count: manifests.length, data: manifests });
+    return res.status(200).json({ success: true, count: manifests.length, data: manifests });
   } catch (error) {
-    console.error("Error fetching asset manifests:", error);
-    res.status(500).json({ success: false, message: "Server error fetching asset manifests" });
+    return handleError(res, error, "Server error fetching asset manifests");
   }
 });
 
 // ✅ CREATE manifest for asset TAG (scoped)
 router.post("/tag/:tag/manifests", authMiddleware, async (req, res) => {
   try {
-    const schoolId = requireSchool(req, res);
-    if (!schoolId) return;
+    const tenantId = getTenantId(req, res);
+    if (!tenantId) return;
 
-    const tag = req.params.tag;
+    const tag = String(req.params.tag || "").trim();
+    if (!tag) return res.status(400).json({ success: false, message: "Tag is required" });
+
     const { busId, assistantId, status, latitude, longitude, session } = req.body;
 
-    if (!busId || !status) {
-      return res.status(400).json({ success: false, message: "busId and status are required" });
+    if (!busId) return res.status(400).json({ success: false, message: "busId is required" });
+
+    const statusEnum = toManifestStatus(status);
+    if (!statusEnum) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status. Use CHECKED_IN/CHECKED_OUT (or onBoard/offBoard)",
+      });
     }
 
+    // Ensure asset belongs to tenant
     const asset = await prisma.asset.findFirst({
-      where: { tag, schoolId },
+      where: { tag, TenantId: tenantId },
       select: { id: true },
     });
     if (!asset) return res.status(404).json({ success: false, message: "Asset not found" });
 
+    // Ensure bus belongs to tenant
     const bus = await prisma.bus.findFirst({
-      where: { id: Number(busId), schoolId },
+      where: { id: Number(busId), TenantId: tenantId },
+      select: { id: true, assistantId: true, plateNumber: true },
     });
-    if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this school" });
+    if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this tenant" });
+
+    // (Optional but recommended) Validate assistant if provided
+    if (assistantId) {
+      const assistant = await prisma.user.findUnique({
+        where: { id: Number(assistantId) },
+        select: { id: true, role: true },
+      });
+      if (!assistant || String(assistant.role).toUpperCase() !== "ASSISTANT") {
+        return res.status(400).json({ success: false, message: "Assistant not found or invalid role" });
+      }
+      // If you want strict assignment check:
+      // if (bus.assistantId && bus.assistantId !== Number(assistantId)) {
+      //   return res.status(400).json({ success: false, message: "Assistant not assigned to this bus" });
+      // }
+    }
+
+    const sessionValue = getSessionValue(session);
+
+    // Prevent duplicates per day (asset + status + session + bus)
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const existing = await prisma.manifest.findFirst({
+      where: {
+        assetId: asset.id,
+        busId: Number(busId),
+        status: statusEnum,
+        session: sessionValue,
+        createdAt: { gte: todayStart, lte: todayEnd },
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      return res.status(400).json({
+        success: false,
+        message: `Asset already ${statusEnum === "CHECKED_IN" ? "checked in" : "checked out"} for ${sessionValue.toLowerCase()} session today.`,
+      });
+    }
 
     const now = new Date();
-    const hours = now.getHours();
-    const sessionValue = session || (hours < 12 ? "MORNING" : "EVENING");
-
-    const statusEnum = status.toString().toUpperCase();
-    if (!["CHECKED_IN", "CHECKED_OUT"].includes(statusEnum)) {
-      return res.status(400).json({ success: false, message: "status must be CHECKED_IN or CHECKED_OUT" });
-    }
 
     const manifest = await prisma.manifest.create({
       data: {
@@ -128,185 +206,187 @@ router.post("/tag/:tag/manifests", authMiddleware, async (req, res) => {
       include: { asset: true, bus: true, assistant: true },
     });
 
-    res.status(201).json({ success: true, message: "Asset manifest created successfully", data: manifest });
+    return res.status(201).json({
+      success: true,
+      message: "Asset manifest created successfully",
+      data: manifest,
+    });
   } catch (error) {
-    console.error("Error creating asset manifest:", error);
-    res.status(500).json({ success: false, message: "Server error creating asset manifest" });
+    return handleError(res, error, "Server error creating asset manifest");
   }
 });
 
 /* =========================================================
-   ✅ ASSET CRUD (SECURED: schoolId comes from token ONLY)
+   ✅ ASSET CRUD (SECURED: TenantId comes from token ONLY)
    ========================================================= */
 
 // ✅ GET all assets (scoped)
 router.get("/", authMiddleware, async (req, res) => {
   try {
-    const schoolId = requireSchool(req, res);
-    if (!schoolId) return;
+    const tenantId = getTenantId(req, res);
+    if (!tenantId) return;
 
     const assets = await prisma.asset.findMany({
-      where: { schoolId },
+      where: { TenantId: tenantId },
       include: {
         parent: { include: { user: true } },
         bus: true,
-        school: true,
+        Tenant: true,
       },
       orderBy: { createdAt: "desc" },
     });
 
-    res.status(200).json({ success: true, data: assets });
+    return res.status(200).json({ success: true, count: assets.length, data: assets });
   } catch (error) {
-    console.error("Error fetching assets:", error);
-    res.status(500).json({ success: false, message: "Server error fetching assets" });
+    return handleError(res, error, "Server error fetching assets");
   }
 });
 
 // ✅ GET asset by ID (scoped)
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
-    const schoolId = requireSchool(req, res);
-    if (!schoolId) return;
+    const tenantId = getTenantId(req, res);
+    if (!tenantId) return;
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid asset id" });
 
     const asset = await prisma.asset.findFirst({
-      where: { id: Number(req.params.id), schoolId },
+      where: { id, TenantId: tenantId },
       include: {
         parent: { include: { user: true } },
         bus: true,
-        school: true,
+        Tenant: true,
       },
     });
 
     if (!asset) return res.status(404).json({ success: false, message: "Asset not found" });
-    res.status(200).json({ success: true, data: asset });
+    return res.status(200).json({ success: true, data: asset });
   } catch (error) {
-    console.error("Error fetching asset:", error);
-    res.status(500).json({ success: false, message: "Server error fetching asset" });
+    return handleError(res, error, "Server error fetching asset");
   }
 });
 
-// ✅ CREATE asset (scoped) — IGNORE body.schoolId
+// ✅ CREATE asset (scoped) — IGNORE body.TenantId
 router.post("/", authMiddleware, async (req, res) => {
   try {
-    const schoolId = requireSchool(req, res);
-    if (!schoolId) return;
+    const tenantId = getTenantId(req, res);
+    if (!tenantId) return;
 
     const { name, type, tag, parentId, busId } = req.body;
 
-    if (!name) return res.status(400).json({ success: false, message: "Asset name is required" });
-
-    // Validate bus belongs to same school if provided
-    if (busId) {
-      const bus = await prisma.bus.findFirst({
-        where: { id: Number(busId), schoolId },
-      });
-      if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this school" });
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ success: false, message: "Asset name is required" });
     }
 
-    // Parent table has no schoolId field; we can only validate existence
+    // Validate bus belongs to tenant if provided
+    if (busId) {
+      const bus = await prisma.bus.findFirst({ where: { id: Number(busId), TenantId: tenantId }, select: { id: true } });
+      if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this tenant" });
+    }
+
+    // Validate parent existence if provided (Parent is global in your schema)
     if (parentId) {
-      const parent = await prisma.parent.findUnique({ where: { id: Number(parentId) } });
+      const parent = await prisma.parent.findUnique({ where: { id: Number(parentId) }, select: { id: true } });
       if (!parent) return res.status(404).json({ success: false, message: "Parent/Client not found" });
     }
 
     const asset = await prisma.asset.create({
       data: {
-        name: name.toString().trim(),
+        name: String(name).trim(),
         type: type ?? null,
-        tag: tag ?? null,
+        tag: tag ? String(tag).trim() : null,
         parentId: parentId ? Number(parentId) : null,
         busId: busId ? Number(busId) : null,
-        schoolId, // ✅ from token
+        TenantId: tenantId,
       },
       include: {
         parent: { include: { user: true } },
         bus: true,
-        school: true,
+        Tenant: true,
       },
     });
 
-    res.status(201).json({ success: true, message: "Asset created successfully", data: asset });
+    return res.status(201).json({ success: true, message: "Asset created successfully", data: asset });
   } catch (error) {
-    console.error("Error creating asset:", error);
-    res.status(500).json({ success: false, message: "Server error creating asset" });
+    return handleError(res, error, "Server error creating asset");
   }
 });
 
-// ✅ UPDATE asset (scoped) — DO NOT allow changing schoolId
+// ✅ UPDATE asset (scoped) — DO NOT allow changing TenantId
 router.put("/:id", authMiddleware, async (req, res) => {
   try {
-    const schoolId = requireSchool(req, res);
-    if (!schoolId) return;
+    const tenantId = getTenantId(req, res);
+    if (!tenantId) return;
 
-    const { id } = req.params;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid asset id" });
 
-    // Ensure asset belongs to this school
     const existing = await prisma.asset.findFirst({
-      where: { id: Number(id), schoolId },
+      where: { id, TenantId: tenantId },
       select: { id: true },
     });
     if (!existing) return res.status(404).json({ success: false, message: "Asset not found" });
 
-    // Validate bus belongs to same school if provided
+    // Validate bus belongs to tenant if provided
     if (req.body.busId !== undefined && req.body.busId !== null && req.body.busId !== "") {
       const bus = await prisma.bus.findFirst({
-        where: { id: Number(req.body.busId), schoolId },
+        where: { id: Number(req.body.busId), TenantId: tenantId },
+        select: { id: true },
       });
-      if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this school" });
+      if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this tenant" });
     }
 
     // Validate parent existence if provided
     if (req.body.parentId !== undefined && req.body.parentId !== null && req.body.parentId !== "") {
-      const parent = await prisma.parent.findUnique({ where: { id: Number(req.body.parentId) } });
+      const parent = await prisma.parent.findUnique({ where: { id: Number(req.body.parentId) }, select: { id: true } });
       if (!parent) return res.status(404).json({ success: false, message: "Parent/Client not found" });
     }
 
-    // ❌ Never trust / allow schoolId updates from body
-    const { schoolId: _ignoreSchoolId, ...safeBody } = req.body;
+    // ❌ Never allow TenantId updates from body
+    const { TenantId: _ignoreTenantId, tenantId: _ignoreTenantId2, ...safeBody } = req.body;
 
     const updated = await prisma.asset.update({
-      where: { id: Number(id) },
+      where: { id },
       data: {
         ...safeBody,
         ...(safeBody.parentId !== undefined ? { parentId: safeBody.parentId ? Number(safeBody.parentId) : null } : {}),
         ...(safeBody.busId !== undefined ? { busId: safeBody.busId ? Number(safeBody.busId) : null } : {}),
-        schoolId, // ✅ enforce same school always
+        TenantId: tenantId, // enforce tenant
       },
       include: {
         parent: { include: { user: true } },
         bus: true,
-        school: true,
+        Tenant: true,
       },
     });
 
-    res.status(200).json({ success: true, message: "Asset updated successfully", data: updated });
+    return res.status(200).json({ success: true, message: "Asset updated successfully", data: updated });
   } catch (error) {
-    console.error("Error updating asset:", error);
-    res.status(500).json({ success: false, message: "Server error updating asset" });
+    return handleError(res, error, "Server error updating asset");
   }
 });
 
 // ✅ DELETE asset (scoped)
 router.delete("/:id", authMiddleware, async (req, res) => {
   try {
-    const schoolId = requireSchool(req, res);
-    if (!schoolId) return;
+    const tenantId = getTenantId(req, res);
+    if (!tenantId) return;
 
-    const { id } = req.params;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid asset id" });
 
-    // Ensure asset belongs to this school
     const existing = await prisma.asset.findFirst({
-      where: { id: Number(id), schoolId },
+      where: { id, TenantId: tenantId },
       select: { id: true },
     });
     if (!existing) return res.status(404).json({ success: false, message: "Asset not found" });
 
-    await prisma.asset.delete({ where: { id: Number(id) } });
+    await prisma.asset.delete({ where: { id } });
 
-    res.status(200).json({ success: true, message: "Asset deleted successfully" });
+    return res.status(200).json({ success: true, message: "Asset deleted successfully" });
   } catch (error) {
-    console.error("Error deleting asset:", error);
-    res.status(500).json({ success: false, message: "Server error deleting asset" });
+    return handleError(res, error, "Server error deleting asset");
   }
 });
 

@@ -20,49 +20,7 @@ model School {
   buses    Bus[]
   students Student[]
   users    User[]
-  assets   Asset[] // ✅ ADD THIS
-}
-
-model BusLocation {
-  id         Int      @id @default(autoincrement())
-  busId      Int
-  deviceId   Int
-  lat        Float
-  lng        Float
-  direction  Int?
-  speed      Float?
-  state      String?
-  movement   String?
-  lastUpdate DateTime
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  bus        Bus      @relation(fields: [busId], references: [id])
-}
-
-model LiveLocation {
-  id            Int      @id @default(autoincrement())
-  vehicleReg    String   @unique
-  busId         Int?
-  lat           Float
-  lng           Float
-  direction     Float
-  speed         Float?
-  movementState String?
-  lastUpdate    DateTime
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  bus           Bus?     @relation(fields: [busId], references: [id])
-}
-
-model Notification {
-  id       Int      @id @default(autoincrement())
-  parentId Int
-  title    String
-  message  String
-  type     String
-  sentAt   DateTime @default(now())
-  read     Boolean  @default(false)
-  parent   Parent   @relation(fields: [parentId], references: [id])
+  assets   Asset[]
 }
 
 model Parent {
@@ -70,7 +28,7 @@ model Parent {
   userId        Int?           @unique
   user          User?          @relation("UserToParent", fields: [userId], references: [id], onDelete: SetNull)
   students      Student[]
-  assets        Asset[] // ✅ ADD THIS
+  assets        Asset[]
   notifications Notification[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
@@ -83,30 +41,29 @@ model User {
   phone    String?
   role     Role
   password String
+
   schoolId Int?
   school   School? @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
   parent Parent? @relation("UserToParent")
 
-  // 🔐 Reset password fields
   resetOtp          String?
   resetOtpExpiresAt DateTime?
   resetOtpSentAt    DateTime?
 
-  // Relations
   driverBuses        Bus[]        @relation("DriverBus")
   assistantBuses     Bus[]        @relation("AssistantBus")
   student            Student?     @relation("UserStudent")
   assistantManifests Manifest[]   @relation("AssistantManifest")
   panicEvents        PanicEvent[] @relation("UserToPanicEvents")
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
+  // ✅ Delivery confirmation relations
   deliveredAssets Asset[] @relation("AssetDeliveredBy")
   confirmedAssets Asset[] @relation("AssetConfirmedBy")
 
-  // Compound uniqueness: only applies when schoolId is NOT null
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([email, schoolId])
   @@unique([phone, schoolId])
 }
@@ -127,14 +84,14 @@ model Asset {
   confirmedAt    DateTime?
 
   deliveredByUserId Int?
-  deliveredByUser   User? @relation("AssetDeliveredBy", fields: [deliveredByUserId], references: [id])
+  deliveredByUser   User? @relation("AssetDeliveredBy", fields: [deliveredByUserId], references: [id], onDelete: SetNull)
 
   confirmedById Int?
-  confirmedBy   User? @relation("AssetConfirmedBy", fields: [confirmedById], references: [id])
+  confirmedBy   User? @relation("AssetConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
 
-  school    School     @relation(fields: [schoolId], references: [id])
-  parent    Parent?    @relation(fields: [parentId], references: [id])
-  bus       Bus?       @relation(fields: [busId], references: [id])
+  school    School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  parent    Parent?    @relation(fields: [parentId], references: [id], onDelete: SetNull)
+  bus       Bus?       @relation(fields: [busId], references: [id], onDelete: SetNull)
   manifests Manifest[]
 }
 
@@ -150,14 +107,14 @@ model Bus {
   schoolId    Int
   updatedAt   DateTime @updatedAt
 
-  assistant     User?          @relation("AssistantBus", fields: [assistantId], references: [id])
-  driver        User?          @relation("DriverBus", fields: [driverId], references: [id])
-  school        School         @relation(fields: [schoolId], references: [id])
+  assistant     User?          @relation("AssistantBus", fields: [assistantId], references: [id], onDelete: SetNull)
+  driver        User?          @relation("DriverBus", fields: [driverId], references: [id], onDelete: SetNull)
+  school        School         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   locations     BusLocation[]
   liveLocations LiveLocation[]
   manifests     Manifest[]
   students      Student[]
-  assets        Asset[] // ✅ ADD THIS
+  assets        Asset[]
 
   @@unique([schoolId, plateNumber])
 }
@@ -175,10 +132,10 @@ model Student {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  bus         Bus          @relation(fields: [busId], references: [id])
+  bus         Bus          @relation(fields: [busId], references: [id], onDelete: Cascade)
   parent      Parent?      @relation(fields: [parentId], references: [id], onDelete: SetNull)
-  school      School       @relation(fields: [schoolId], references: [id])
-  user        User?        @relation("UserStudent", fields: [userId], references: [id])
+  school      School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  user        User?        @relation("UserStudent", fields: [userId], references: [id], onDelete: SetNull)
   manifests   Manifest[]
   panicEvents PanicEvent[]
 }
@@ -199,13 +156,55 @@ model Manifest {
   status        ManifestStatus
   session       ManifestSession @default(MORNING)
 
-  assistant User?    @relation("AssistantManifest", fields: [assistantId], references: [id])
-  bus       Bus      @relation(fields: [busId], references: [id])
-  student   Student? @relation(fields: [studentId], references: [id])
-  asset     Asset?   @relation(fields: [assetId], references: [id])
+  assistant User?    @relation("AssistantManifest", fields: [assistantId], references: [id], onDelete: SetNull)
+  bus       Bus      @relation(fields: [busId], references: [id], onDelete: Cascade)
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  asset     Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
 
   @@index([studentId])
   @@index([assetId])
+}
+
+model Notification {
+  id       Int      @id @default(autoincrement())
+  parentId Int
+  title    String
+  message  String
+  type     String
+  sentAt   DateTime @default(now())
+  read     Boolean  @default(false)
+  parent   Parent   @relation(fields: [parentId], references: [id], onDelete: Cascade)
+}
+
+model BusLocation {
+  id         Int      @id @default(autoincrement())
+  busId      Int
+  deviceId   Int
+  lat        Float
+  lng        Float
+  direction  Int?
+  speed      Float?
+  state      String?
+  movement   String?
+  lastUpdate DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  bus        Bus      @relation(fields: [busId], references: [id], onDelete: Cascade)
+}
+
+model LiveLocation {
+  id            Int      @id @default(autoincrement())
+  vehicleReg    String   @unique
+  busId         Int?
+  lat           Float
+  lng           Float
+  direction     Float
+  speed         Float?
+  movementState String?
+  lastUpdate    DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  bus           Bus?     @relation(fields: [busId], references: [id], onDelete: SetNull)
 }
 
 model PanicEvent {
@@ -222,8 +221,8 @@ model PanicEvent {
   createdAt   DateTime    @default(now())
   createdBy   String
 
-  user  User    @relation(fields: [userId], references: [id], name: "UserToPanicEvents")
-  child Student @relation(fields: [childId], references: [id])
+  user  User    @relation(fields: [userId], references: [id], name: "UserToPanicEvents", onDelete: Cascade)
+  child Student @relation(fields: [childId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([childId])

@@ -1,28 +1,78 @@
+// src/routes/manifestRoutes.js
 import express from "express";
 import prisma from "../middleware/prisma.js";
+import { authMiddleware } from "../middleware/auth.js";
 import { notifyRecipient, notifyParent } from "../services/notification.service.js";
 
 const router = express.Router();
+
+/* =========================
+   Helpers
+   ========================= */
+function requireTenant(req, res) {
+  const tenantId = req.user?.tenantId;
+  if (!tenantId) {
+    res.status(403).json({ success: false, message: "Forbidden: token missing tenantId" });
+    return null;
+  }
+  const n = Number(tenantId);
+  if (!Number.isFinite(n)) {
+    res.status(400).json({ success: false, message: "Invalid tenantId in token" });
+    return null;
+  }
+  return n;
+}
+
+function parseId(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 /** ✅ Map API status to Prisma enum */
 function toManifestStatus(status) {
   if (!status) return null;
   const s = status.toString().toLowerCase();
 
-  // Accept both old and new values
   if (["checked_in", "onboard", "onboarded", "checkin", "in"].includes(s)) return "CHECKED_IN";
   if (["checked_out", "offboard", "offboarded", "checkout", "out"].includes(s)) return "CHECKED_OUT";
 
-  // Already enum?
   if (["CHECKED_IN", "CHECKED_OUT"].includes(status)) return status;
 
   return null;
 }
 
-// ✅ GET all manifests
-router.get("/", async (req, res) => {
+/** ✅ Default MORNING/EVENING */
+function resolveSession(session) {
+  if (session && ["MORNING", "EVENING"].includes(String(session).toUpperCase())) {
+    return String(session).toUpperCase();
+  }
+  const h = new Date().getHours();
+  return h < 12 ? "MORNING" : "EVENING";
+}
+
+/** ✅ today range (for duplicate prevention) */
+function todayRange() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+/* =========================================================
+   GET all manifests (tenant scoped)
+   ========================================================= */
+router.get("/", authMiddleware, async (req, res) => {
   try {
+    const tenantId = requireTenant(req, res);
+    if (!tenantId) return;
+
+    // IMPORTANT: Manifest has no TenantId column in your schema,
+    // so we scope via bus -> TenantId, plus (student/asset) are also tenant-scoped.
     const manifests = await prisma.manifest.findMany({
+      where: {
+        bus: { TenantId: tenantId },
+      },
       include: {
         student: true,
         asset: true,
@@ -32,18 +82,29 @@ router.get("/", async (req, res) => {
       orderBy: { createdAt: "desc" },
     });
 
-    res.status(200).json({ success: true, data: manifests });
+    return res.status(200).json({ success: true, count: manifests.length, data: manifests });
   } catch (error) {
     console.error("Error fetching manifests:", error);
-    res.status(500).json({ success: false, message: "Server error fetching manifests" });
+    return res.status(500).json({ success: false, message: "Server error fetching manifests" });
   }
 });
 
-// ✅ GET manifest by ID
-router.get("/:id", async (req, res) => {
+/* =========================================================
+   GET manifest by ID (tenant scoped)
+   ========================================================= */
+router.get("/:id", authMiddleware, async (req, res) => {
   try {
-    const manifest = await prisma.manifest.findUnique({
-      where: { id: Number(req.params.id) },
+    const tenantId = requireTenant(req, res);
+    if (!tenantId) return;
+
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: "Invalid manifest id" });
+
+    const manifest = await prisma.manifest.findFirst({
+      where: {
+        id,
+        bus: { TenantId: tenantId },
+      },
       include: {
         student: true,
         asset: true,
@@ -53,28 +114,28 @@ router.get("/:id", async (req, res) => {
     });
 
     if (!manifest) return res.status(404).json({ success: false, message: "Manifest not found" });
-    res.status(200).json({ success: true, data: manifest });
+    return res.status(200).json({ success: true, data: manifest });
   } catch (error) {
     console.error("Error fetching manifest:", error);
-    res.status(500).json({ success: false, message: "Server error fetching manifest" });
+    return res.status(500).json({ success: false, message: "Server error fetching manifest" });
   }
 });
 
-// ✅ CREATE manifest with morning/evening and SMS support
-router.post("/", async (req, res) => {
+/* =========================================================
+   CREATE manifest (tenant scoped, student OR asset)
+   ========================================================= */
+router.post("/", authMiddleware, async (req, res) => {
   try {
-    // ✅ Support student OR asset
+    const tenantId = requireTenant(req, res);
+    if (!tenantId) return;
+
     const { studentId, assetId, busId, assistantId, status, latitude, longitude, session } = req.body;
 
     // Must provide exactly one
     if (!!studentId === !!assetId) {
-      return res.status(400).json({
-        success: false,
-        message: "Provide exactly one: studentId OR assetId",
-      });
+      return res.status(400).json({ success: false, message: "Provide exactly one: studentId OR assetId" });
     }
 
-    // ✅ Map to enum (Prisma expects CHECKED_IN / CHECKED_OUT)
     const statusEnum = toManifestStatus(status);
     if (!statusEnum) {
       return res.status(400).json({
@@ -83,42 +144,44 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // Validate bus, assistant existence
-    const bus = await prisma.bus.findUnique({ where: { id: Number(busId) } });
-    const assistant = await prisma.user.findUnique({ where: { id: Number(assistantId) } });
+    const busIdNum = parseId(busId);
+    const assistantIdNum = parseId(assistantId);
+    if (!busIdNum) return res.status(400).json({ success: false, message: "busId is required" });
+    if (!assistantIdNum) return res.status(400).json({ success: false, message: "assistantId is required" });
 
-    if (!bus) return res.status(404).json({ success: false, message: "Bus not found" });
-    if (!assistant || assistant.role !== "ASSISTANT") {
-      return res.status(400).json({ success: false, message: "Assistant not found or invalid role" });
-    }
+    // ✅ Validate bus belongs to tenant
+    const bus = await prisma.bus.findFirst({
+      where: { id: busIdNum, TenantId: tenantId },
+      select: { id: true, plateNumber: true, assistantId: true },
+    });
+    if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this tenant" });
 
-    // Ensure assistant assigned to this bus
+    // ✅ Validate assistant belongs to tenant + role
+    const assistant = await prisma.user.findFirst({
+      where: { id: assistantIdNum, TenantId: tenantId, role: "ASSISTANT" },
+      select: { id: true, name: true },
+    });
+    if (!assistant) return res.status(400).json({ success: false, message: "Assistant not found for this tenant" });
+
+    // Ensure assistant assigned to this bus (keeps your original behavior)
     if (bus.assistantId !== assistant.id) {
       return res.status(400).json({ success: false, message: "Assistant not assigned to this bus" });
     }
 
-    // ✅ Determine MORNING / EVENING session
-    const now = new Date();
-    const hours = now.getHours();
-    const sessionValue = session || (hours < 12 ? "MORNING" : "EVENING");
+    const sessionValue = resolveSession(session);
 
-    // ✅ Prevent duplicate check-in/check-out (per subject)
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
-
+    // ✅ Prevent duplicates (subject + bus + status + session + day)
+    const { start, end } = todayRange();
     const existingManifest = await prisma.manifest.findFirst({
       where: {
-        busId: Number(busId),
+        busId: busIdNum,
         status: statusEnum,
         session: sessionValue,
-        createdAt: { gte: todayStart, lte: todayEnd },
-
-        // scope uniqueness by subject
+        createdAt: { gte: start, lte: end },
         ...(studentId ? { studentId: Number(studentId) } : {}),
         ...(assetId ? { assetId: Number(assetId) } : {}),
       },
+      select: { id: true },
     });
 
     if (existingManifest) {
@@ -131,45 +194,44 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // ✅ Fetch subject + recipient (Parent table = recipient for both modes)
+    // ✅ Fetch subject (tenant-scoped) + recipient
     let subject = null;
     let mode = "KID";
 
     if (studentId) {
-      subject = await prisma.student.findUnique({
-        where: { id: Number(studentId) },
+      subject = await prisma.student.findFirst({
+        where: { id: Number(studentId), TenantId: tenantId },
         include: {
           parent: { include: { user: true } },
-          school: true,
+          Tenant: { select: { mode: true } },
         },
       });
       if (!subject) return res.status(404).json({ success: false, message: "Student not found" });
-      mode = subject.school?.mode || "KID";
+      mode = subject.Tenant?.mode || "KID";
     } else {
-      subject = await prisma.asset.findUnique({
-        where: { id: Number(assetId) },
+      subject = await prisma.asset.findFirst({
+        where: { id: Number(assetId), TenantId: tenantId },
         include: {
           parent: { include: { user: true } },
-          school: true,
+          Tenant: { select: { mode: true } },
         },
       });
       if (!subject) return res.status(404).json({ success: false, message: "Asset not found" });
-      mode = subject.school?.mode || "ASSET";
+      mode = subject.Tenant?.mode || "ASSET";
     }
 
-    // ✅ Create manifest
+    const now = new Date();
+
     const manifest = await prisma.manifest.create({
       data: {
         studentId: studentId ? Number(studentId) : null,
         assetId: assetId ? Number(assetId) : null,
-        busId: Number(busId),
-        assistantId: Number(assistantId),
+        busId: busIdNum,
+        assistantId: assistantIdNum,
         latitude: latitude ?? null,
         longitude: longitude ?? null,
         status: statusEnum,
         session: sessionValue,
-
-        // optional timestamps
         boardingTime: statusEnum === "CHECKED_IN" ? now : null,
         alightingTime: statusEnum === "CHECKED_OUT" ? now : null,
       },
@@ -181,7 +243,7 @@ router.post("/", async (req, res) => {
       },
     });
 
-    // 🔔 Send SMS notification (new engine)
+    // 🔔 Send SMS notification (recipient = parent.user for both kid/asset modes)
     try {
       const recipientUser = subject?.parent?.user;
       const recipientPhone = recipientUser?.phone;
@@ -189,7 +251,6 @@ router.post("/", async (req, res) => {
       const subjectName = subject?.name || "Item";
 
       if (recipientPhone) {
-        // ✅ Prefer new generic notifier
         await notifyRecipient({
           recipientName,
           recipientPhone,
@@ -206,80 +267,117 @@ router.post("/", async (req, res) => {
       console.error("❌ SMS sending error:", smsError);
     }
 
-    // ✅ Backward compatibility (optional)
-    // If you still want the old parent message format ONLY for Kid mode:
-    // (You can remove this block if you don't need it.)
-   
+    // Optional legacy message (Kid mode)
     if (mode === "KID") {
-      const parentPhone = subject?.parent?.user?.phone;
-      const parentName = (subject?.parent?.user?.name || "Parent").split(" ")[0];
-      if (parentPhone) {
-        const eventType = statusEnum === "CHECKED_IN" ? "onBoard" : "offBoard";
-        await notifyParent({
-          parentPhone,
-          parentName,
-          studentName: subject.name,
-          eventType,
-          busNumber: bus?.plateNumber || String(bus?.id),
-          session: sessionValue,
-        });
+      try {
+        const parentPhone = subject?.parent?.user?.phone;
+        const parentName = (subject?.parent?.user?.name || "Parent").split(" ")[0];
+        if (parentPhone) {
+          const eventType = statusEnum === "CHECKED_IN" ? "onBoard" : "offBoard";
+          await notifyParent({
+            parentPhone,
+            parentName,
+            studentName: subject.name,
+            eventType,
+            busNumber: bus?.plateNumber || String(bus?.id),
+            session: sessionValue,
+          });
+        }
+      } catch (legacyErr) {
+        console.error("❌ Legacy notifyParent error:", legacyErr);
       }
     }
-   
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: `Manifest created successfully for ${sessionValue} session`,
       data: manifest,
     });
   } catch (error) {
     console.error("Error creating manifest:", error);
-    res.status(500).json({ success: false, message: "Server error creating manifest" });
+    return res.status(500).json({ success: false, message: "Server error creating manifest" });
   }
 });
 
-// ✅ UPDATE manifest (keep your style, but make enum-safe + timestamps)
-router.put("/:id", async (req, res) => {
+/* =========================================================
+   UPDATE manifest (tenant scoped)
+   ========================================================= */
+router.put("/:id", authMiddleware, async (req, res) => {
   try {
-    const { id } = req.params;
+    const tenantId = requireTenant(req, res);
+    if (!tenantId) return;
+
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: "Invalid manifest id" });
+
+    // ensure it belongs to tenant via bus
+    const existing = await prisma.manifest.findFirst({
+      where: { id, bus: { TenantId: tenantId } },
+      select: { id: true },
+    });
+    if (!existing) return res.status(404).json({ success: false, message: "Manifest not found" });
 
     const payload = { ...req.body };
 
-    // If status provided, map it + set timestamps
     if (payload.status) {
       const statusEnum = toManifestStatus(payload.status);
-      if (!statusEnum) {
-        return res.status(400).json({ success: false, message: "Invalid status" });
-      }
-      payload.status = statusEnum;
+      if (!statusEnum) return res.status(400).json({ success: false, message: "Invalid status" });
 
+      payload.status = statusEnum;
       const now = new Date();
       if (statusEnum === "CHECKED_IN") payload.boardingTime = now;
       if (statusEnum === "CHECKED_OUT") payload.alightingTime = now;
     }
 
+    // hard safety: don’t allow moving a manifest to a bus in another tenant
+    if (payload.busId !== undefined) {
+      const busIdNum = parseId(payload.busId);
+      if (!busIdNum) return res.status(400).json({ success: false, message: "Invalid busId" });
+
+      const bus = await prisma.bus.findFirst({
+        where: { id: busIdNum, TenantId: tenantId },
+        select: { id: true },
+      });
+      if (!bus) return res.status(404).json({ success: false, message: "Bus not found for this tenant" });
+      payload.busId = busIdNum;
+    }
+
     const updated = await prisma.manifest.update({
-      where: { id: Number(id) },
+      where: { id },
       data: payload,
       include: { student: true, asset: true, bus: true, assistant: true },
     });
 
-    res.status(200).json({ success: true, message: "Manifest updated successfully", data: updated });
+    return res.status(200).json({ success: true, message: "Manifest updated successfully", data: updated });
   } catch (error) {
     console.error("Error updating manifest:", error);
-    res.status(500).json({ success: false, message: "Server error updating manifest" });
+    return res.status(500).json({ success: false, message: "Server error updating manifest" });
   }
 });
 
-// ✅ DELETE manifest
-router.delete("/:id", async (req, res) => {
+/* =========================================================
+   DELETE manifest (tenant scoped)
+   ========================================================= */
+router.delete("/:id", authMiddleware, async (req, res) => {
   try {
-    const { id } = req.params;
-    await prisma.manifest.delete({ where: { id: Number(id) } });
-    res.status(200).json({ success: true, message: "Manifest deleted successfully" });
+    const tenantId = requireTenant(req, res);
+    if (!tenantId) return;
+
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: "Invalid manifest id" });
+
+    // ensure it belongs to tenant
+    const existing = await prisma.manifest.findFirst({
+      where: { id, bus: { TenantId: tenantId } },
+      select: { id: true },
+    });
+    if (!existing) return res.status(404).json({ success: false, message: "Manifest not found" });
+
+    await prisma.manifest.delete({ where: { id } });
+    return res.status(200).json({ success: true, message: "Manifest deleted successfully" });
   } catch (error) {
     console.error("Error deleting manifest:", error);
-    res.status(500).json({ success: false, message: "Server error deleting manifest" });
+    return res.status(500).json({ success: false, message: "Server error deleting manifest" });
   }
 });
 

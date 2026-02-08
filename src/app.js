@@ -27,7 +27,7 @@ import publicRoutes from "./routes/publicRoutes.js";
 import busRoutes from "./routes/busRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import schoolRoutes from "./routes/schoolRoutes.js";
-
+import tenantRoutes from "./routes/tenantRoutes.js";
 
 
 const PORT = process.env.PORT || 5000;
@@ -75,7 +75,7 @@ app.use("/api/public", publicRoutes);
 app.use("/api/buses", busRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/schools", schoolRoutes);
-
+app.use("/api/tenants", tenantRoutes);
 
 
 
