@@ -35,10 +35,10 @@ function parseFloatSafe(v) {
 }
 
 /**
- * Common include
+ * Common include (✅ fixed: tenant relation name)
  */
 const studentInclude = {
-  Tenant: true,
+  tenant: true, // ✅ was Tenant
   bus: true,
   parent: { include: { user: true } },
 };
@@ -74,7 +74,7 @@ router.get("/", authMiddleware, async (req, res) => {
     if (!tenantId) return;
 
     const students = await prisma.student.findMany({
-      where: { TenantId: tenantId },
+      where: { tenantId }, // ✅ was TenantId
       include: studentInclude,
       orderBy: { id: "desc" },
     });
@@ -95,7 +95,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
     if (!studentId) return res.status(400).json({ success: false, message: "Invalid student id" });
 
     const student = await prisma.student.findFirst({
-      where: { id: studentId, TenantId: tenantId },
+      where: { id: studentId, tenantId }, // ✅ was TenantId
       include: studentInclude,
     });
 
@@ -151,20 +151,20 @@ router.post("/", authMiddleware, async (req, res) => {
 
     // Ensure bus belongs to this tenant
     const bus = await prisma.bus.findFirst({
-      where: { id: busIdNum, TenantId: tenantId },
+      where: { id: busIdNum, tenantId }, // ✅ was TenantId (assumes Bus model uses tenantId)
       select: { id: true },
     });
     if (!bus) {
       return res.status(400).json({ success: false, message: "Invalid busId (not found for this tenant)" });
     }
 
-    // Find parent by user within same tenant (scope by User.TenantId)
+    // Find parent by user within same tenant (scope by User.tenantId)
     let parent = null;
     if (parentPhone || parentEmail) {
       parent = await prisma.parent.findFirst({
         where: {
           user: {
-            TenantId: tenantId,
+            tenantId, // ✅ was TenantId (assumes User model uses tenantId)
             OR: [
               parentPhone ? { phone: parentPhone } : undefined,
               parentEmail ? { email: parentEmail } : undefined,
@@ -188,7 +188,7 @@ router.post("/", authMiddleware, async (req, res) => {
             phone: parentPhone ?? null,
             password: hashed,
             role: "PARENT",
-            TenantId: tenantId,
+            tenantId, // ✅ was TenantId (assumes User model uses tenantId)
           },
         });
 
@@ -206,7 +206,7 @@ router.post("/", authMiddleware, async (req, res) => {
           latitude: latNum,
           longitude: lngNum,
           busId: busIdNum,
-          TenantId: tenantId,
+          tenantId, // ✅ was TenantId
           parentId: parent.id,
         },
         include: studentInclude,
@@ -230,19 +230,10 @@ router.put("/:id", authMiddleware, async (req, res) => {
     const studentId = parseId(req.params.id);
     if (!studentId) return res.status(400).json({ success: false, message: "Invalid student id" });
 
-    const {
-      parentName,
-      parentPhone,
-      parentEmail,
-      parentPassword,
-      busId,
-      latitude,
-      longitude,
-      ...rest
-    } = req.body;
+    const { parentName, parentPhone, parentEmail, parentPassword, busId, latitude, longitude, ...rest } = req.body;
 
     const existing = await prisma.student.findFirst({
-      where: { id: studentId, TenantId: tenantId },
+      where: { id: studentId, tenantId }, // ✅ was TenantId
       include: { parent: { include: { user: true } } },
     });
     if (!existing) return res.status(404).json({ success: false, message: "Student not found" });
@@ -254,7 +245,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
       if (!busIdNum) return res.status(400).json({ success: false, message: "Invalid busId" });
 
       const bus = await prisma.bus.findFirst({
-        where: { id: busIdNum, TenantId: tenantId },
+        where: { id: busIdNum, tenantId }, // ✅ was TenantId (assumes Bus model uses tenantId)
         select: { id: true },
       });
       if (!bus) return res.status(400).json({ success: false, message: "Bus not found for this tenant" });
@@ -275,7 +266,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
           ...(busId !== undefined ? { busId: busIdNum } : {}),
           ...(latitude !== undefined ? { latitude: latNum } : {}),
           ...(longitude !== undefined ? { longitude: lngNum } : {}),
-          TenantId: tenantId, // enforce tenant (extra safety)
+          tenantId, // ✅ was TenantId
         },
         include: studentInclude,
       });
@@ -300,7 +291,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
               email: parentEmail,
               password: hashed,
               role: "PARENT",
-              TenantId: tenantId,
+              tenantId, // ✅ was TenantId (assumes User model uses tenantId)
             },
           });
 
@@ -315,8 +306,8 @@ router.put("/:id", authMiddleware, async (req, res) => {
           if (parentEmail !== undefined) updateData.email = parentEmail || null;
           if (parentPassword) updateData.password = await bcrypt.hash(parentPassword, 10);
 
-          // Optional: enforce tenant on user (recommended)
-          updateData.TenantId = tenantId;
+          // enforce tenant on user (recommended)
+          updateData.tenantId = tenantId; // ✅ was TenantId (assumes User model uses tenantId)
 
           if (Object.keys(updateData).length) {
             await tx.user.update({ where: { id: parent.user.id }, data: updateData });
@@ -343,7 +334,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     if (!studentId) return res.status(400).json({ success: false, message: "Invalid student id" });
 
     const student = await prisma.student.findFirst({
-      where: { id: studentId, TenantId: tenantId },
+      where: { id: studentId, tenantId }, // ✅ was TenantId
       include: { parent: { include: { user: true } } },
     });
     if (!student) return res.status(404).json({ success: false, message: "Student not found" });
