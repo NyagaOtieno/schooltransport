@@ -5,156 +5,244 @@ import { authMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
 
-function requireTenant(req, res) {
-  const tenantId = req.user?.tenantId;
-  if (!tenantId) {
-    res.status(403).json({ success: false, message: "Forbidden: token missing tenantId" });
-    return null;
-  }
-  return Number(tenantId);
-}
-
-function parseId(id) {
-  const n = Number(id);
+/* =========================
+   Helpers
+========================= */
+const toInt = (v) => {
+  const n = Number(v);
   return Number.isFinite(n) ? n : null;
-}
+};
+
+const getIp = (req) =>
+  req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
+  req.ip ||
+  "unknown";
 
 function prismaError(res, err, fallback = "Server error") {
-  console.error(err);
+  console.error("❌ TenantRoutes error:", {
+    code: err?.code,
+    message: err?.message,
+    meta: err?.meta,
+  });
 
   if (err?.code === "P2002") {
-    return res.status(409).json({ success: false, message: "Duplicate conflict", detail: err?.meta });
+    return res
+      .status(409)
+      .json({ success: false, message: "Duplicate conflict", fields: err?.meta?.target });
   }
   if (err?.code === "P2025") {
     return res.status(404).json({ success: false, message: "Record not found" });
   }
 
-  return res.status(500).json({ success: false, message: fallback, detail: err?.message });
+  return res.status(500).json({
+    success: false,
+    message: fallback,
+    detail: process.env.NODE_ENV === "production" ? undefined : err?.message,
+  });
+}
+
+function requireAuth(req, res, next) {
+  return authMiddleware(req, res, next);
+}
+
+function requireTenant(req, res, next) {
+  const tenantId = toInt(req.user?.tenantId);
+  if (!tenantId) {
+    return res
+      .status(403)
+      .json({ success: false, message: "Forbidden: token missing tenantId" });
+  }
+  req.tenantId = tenantId;
+  next();
 }
 
 /**
- * GET /api/tenants/me
- * Returns tenant info for the logged-in user (tenantId comes from JWT)
+ * Optional: restrict admin endpoints
  */
-router.get("/me", authMiddleware, async (req, res) => {
-  try {
-    const tenantId = requireTenant(req, res);
-    if (!tenantId) return;
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== "ADMIN") {
+    return res.status(403).json({ success: false, message: "Admin only" });
+  }
+  next();
+}
 
+function pickTenantInput(body) {
+  const name = body?.name !== undefined ? String(body.name).trim() : undefined;
+  const mode = body?.mode !== undefined ? body.mode : undefined; // AppMode enum validated by Prisma
+  const logoUrl = body?.logoUrl !== undefined ? (body.logoUrl ? String(body.logoUrl) : null) : undefined;
+  const address = body?.address !== undefined ? (body.address ? String(body.address) : null) : undefined;
+  const phone = body?.phone !== undefined ? (body.phone ? String(body.phone) : null) : undefined;
+
+  return { name, mode, logoUrl, address, phone };
+}
+
+const tenantSelect = {
+  id: true,
+  name: true,
+  mode: true,
+  logoUrl: true,
+  address: true,
+  phone: true,
+  createdAt: true,
+  updatedAt: true,
+};
+
+/* =========================
+   Routes
+========================= */
+
+/**
+ * ✅ GET /api/tenants/me
+ * Returns tenant info for the logged-in user (tenantId from JWT)
+ */
+router.get("/me", requireAuth, requireTenant, async (req, res) => {
+  try {
     const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { id: true, name: true, mode: true, logoUrl: true, address: true, phone: true },
+      where: { id: req.tenantId },
+      select: tenantSelect,
     });
 
-    if (!tenant) return res.status(404).json({ success: false, message: "Tenant not found" });
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: "Tenant not found" });
+    }
 
-    res.json({ success: true, data: tenant });
+    return res.json({ success: true, data: tenant });
   } catch (err) {
-    prismaError(res, err, "Failed to fetch tenant");
+    return prismaError(res, err, "Failed to fetch tenant");
   }
 });
 
 /**
- * OPTIONAL ADMIN ENDPOINTS
- * If you want to restrict these to ADMIN only, add a role check:
- * if (req.user.role !== "ADMIN") return res.status(403)...
+ * ✅ ADMIN: GET /api/tenants
+ * List all tenants
  */
-
-// GET all tenants
-router.get("/", authMiddleware, async (req, res) => {
+router.get("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const tenants = await prisma.tenant.findMany({
-      select: { id: true, name: true, mode: true, logoUrl: true, address: true, phone: true, createdAt: true },
+      select: tenantSelect,
       orderBy: { id: "desc" },
     });
 
-    res.json({ success: true, count: tenants.length, data: tenants });
+    return res.json({ success: true, count: tenants.length, data: tenants });
   } catch (err) {
-    prismaError(res, err, "Failed to fetch tenants");
+    return prismaError(res, err, "Failed to fetch tenants");
   }
 });
 
-// GET tenant by id
-router.get("/:id", authMiddleware, async (req, res) => {
+/**
+ * ✅ ADMIN: GET /api/tenants/:id
+ */
+router.get("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const id = parseId(req.params.id);
+    const id = toInt(req.params.id);
     if (!id) return res.status(400).json({ success: false, message: "Invalid tenant id" });
 
     const tenant = await prisma.tenant.findUnique({
       where: { id },
-      select: { id: true, name: true, mode: true, logoUrl: true, address: true, phone: true, createdAt: true },
+      select: tenantSelect,
     });
 
     if (!tenant) return res.status(404).json({ success: false, message: "Tenant not found" });
-
-    res.json({ success: true, data: tenant });
+    return res.json({ success: true, data: tenant });
   } catch (err) {
-    prismaError(res, err, "Failed to fetch tenant");
+    return prismaError(res, err, "Failed to fetch tenant");
   }
 });
 
-// CREATE tenant
-router.post("/", authMiddleware, async (req, res) => {
+/**
+ * ✅ ADMIN: POST /api/tenants
+ * Creates a tenant
+ * NOTE: In a strict multi-tenant system, tenant creation is usually only in bootstrap/admin context.
+ */
+router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { name, mode, logoUrl, address, phone } = req.body;
+    const input = pickTenantInput(req.body);
 
-    if (!name) return res.status(400).json({ success: false, message: "name is required" });
+    if (!input.name) {
+      return res.status(400).json({ success: false, message: "name is required" });
+    }
 
     const tenant = await prisma.tenant.create({
       data: {
-        name: name.toString().trim(),
-        mode: mode || undefined,
-        logoUrl: logoUrl || null,
-        address: address || null,
-        phone: phone || null,
+        name: input.name,
+        mode: input.mode,
+        logoUrl: input.logoUrl ?? null,
+        address: input.address ?? null,
+        phone: input.phone ?? null,
       },
-      select: { id: true, name: true, mode: true, logoUrl: true, address: true, phone: true, createdAt: true },
+      select: tenantSelect,
     });
 
-    res.status(201).json({ success: true, message: "Tenant created", data: tenant });
+    return res.status(201).json({ success: true, message: "Tenant created", data: tenant });
   } catch (err) {
-    prismaError(res, err, "Failed to create tenant");
+    return prismaError(res, err, "Failed to create tenant");
   }
 });
 
-// UPDATE tenant
-router.put("/:id", authMiddleware, async (req, res) => {
+/**
+ * ✅ ADMIN: PUT /api/tenants/:id
+ */
+router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const id = parseId(req.params.id);
+    const id = toInt(req.params.id);
     if (!id) return res.status(400).json({ success: false, message: "Invalid tenant id" });
 
-    const { name, mode, logoUrl, address, phone } = req.body;
+    const input = pickTenantInput(req.body);
+
+    // prevent accidental empty name overwrite
+    if (input.name !== undefined && input.name.length === 0) {
+      return res.status(400).json({ success: false, message: "name cannot be empty" });
+    }
 
     const tenant = await prisma.tenant.update({
       where: { id },
       data: {
-        ...(name !== undefined ? { name: name ? name.toString().trim() : "" } : {}),
-        ...(mode !== undefined ? { mode } : {}),
-        ...(logoUrl !== undefined ? { logoUrl: logoUrl || null } : {}),
-        ...(address !== undefined ? { address: address || null } : {}),
-        ...(phone !== undefined ? { phone: phone || null } : {}),
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.mode !== undefined ? { mode: input.mode } : {}),
+        ...(input.logoUrl !== undefined ? { logoUrl: input.logoUrl } : {}),
+        ...(input.address !== undefined ? { address: input.address } : {}),
+        ...(input.phone !== undefined ? { phone: input.phone } : {}),
       },
-      select: { id: true, name: true, mode: true, logoUrl: true, address: true, phone: true, updatedAt: true },
+      select: tenantSelect,
     });
 
-    res.json({ success: true, message: "Tenant updated", data: tenant });
+    return res.json({ success: true, message: "Tenant updated", data: tenant });
   } catch (err) {
-    prismaError(res, err, "Failed to update tenant");
+    return prismaError(res, err, "Failed to update tenant");
   }
 });
 
-// DELETE tenant
-router.delete("/:id", authMiddleware, async (req, res) => {
+/**
+ * ✅ ADMIN: DELETE /api/tenants/:id
+ * Safety: in production, prefer "soft delete" (disabledAt) to avoid cascade data loss.
+ */
+router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const id = parseId(req.params.id);
+    const id = toInt(req.params.id);
     if (!id) return res.status(400).json({ success: false, message: "Invalid tenant id" });
 
     await prisma.tenant.delete({ where: { id } });
 
-    res.json({ success: true, message: "Tenant deleted" });
+    return res.json({ success: true, message: "Tenant deleted" });
   } catch (err) {
-    prismaError(res, err, "Failed to delete tenant");
+    return prismaError(res, err, "Failed to delete tenant");
   }
+});
+
+/**
+ * ✅ Health/debug helper (optional)
+ * GET /api/tenants/_whoami
+ */
+router.get("/_whoami", requireAuth, async (req, res) => {
+  return res.json({
+    success: true,
+    user: {
+      id: req.user?.id,
+      role: req.user?.role,
+      tenantId: req.user?.tenantId,
+    },
+    ip: getIp(req),
+  });
 });
 
 export default router;
