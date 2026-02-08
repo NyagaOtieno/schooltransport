@@ -18,14 +18,14 @@ const normEmail = (v) => (v ? String(v).trim().toLowerCase() : null);
 const normPhone = (v) => (v ? String(v).trim() : null);
 const toUpper = (v) => (v ? String(v).trim().toUpperCase() : null);
 
-function toInt(v) {
+const toInt = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
-}
+};
 
 /**
  * Backward compatible: accept tenantId OR TenantId OR schoolId
- * (Do NOT store TenantId anywhere; only use tenantId in DB)
+ * IMPORTANT: DB field is tenantId (camelCase). Never use TenantId in Prisma queries.
  */
 function resolveTenantId(body) {
   const raw = body?.tenantId ?? body?.TenantId ?? body?.schoolId;
@@ -42,7 +42,7 @@ function signToken(user) {
       role: toUpper(user.role),
       tenantId: tenantId !== null ? Number(tenantId) : null,
 
-      // backward compatibility for old clients
+      // backward compatibility
       schoolId: tenantId !== null ? Number(tenantId) : null,
     },
     process.env.JWT_SECRET,
@@ -95,17 +95,21 @@ router.post("/register", async (req, res) => {
     if (!ALLOWED_ROLES.includes(role)) {
       return res.status(400).json({
         success: false,
-        message: Invalid role. Allowed roles: ${ALLOWED_ROLES.join(", ")},
-      });
+        // ✅ OPTION A (template string) — correct backticks
+       message: `Invalid role. Allowed roles: ${ALLOWED_ROLES.join(", ")}`,
+             });
     }
 
     // Ensure tenant exists
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { id: true },
+    });
     if (!tenant) {
       return res.status(400).json({ success: false, message: "Tenant does not exist" });
     }
 
-    // Check if email/phone already exists within same tenant
+    // Check if email/phone already exists within the same tenant
     const existingUser = await prisma.user.findFirst({
       where: {
         tenantId,
@@ -121,8 +125,10 @@ router.post("/register", async (req, res) => {
       });
     }
 
+    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Create user (use tenantId only)
     const user = await prisma.user.create({
       data: {
         name,
@@ -172,17 +178,17 @@ router.post("/login", async (req, res) => {
 
     let user = null;
 
+    // Best practice: login scoped by tenantId
     if (tenantId) {
-      // ✅ Correct scoping (best practice)
       user = await prisma.user.findFirst({
         where: { email, tenantId },
       });
     } else {
-      // If tenantId isn't provided, email could exist in multiple tenants.
+      // Without tenantId, email may exist in multiple tenants -> block and ask for tenantId
       const matches = await prisma.user.findMany({
         where: { email },
         select: { id: true, tenantId: true },
-        take: 2, // just to detect multiple
+        take: 2,
       });
 
       if (matches.length > 1) {
@@ -203,8 +209,6 @@ router.post("/login", async (req, res) => {
     if (!valid) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
     const token = signToken(user);
-
-    // Don’t leak password
     const { password: _pw, ...safeUser } = user;
 
     return res.json({
