@@ -87,11 +87,22 @@ function buildSafeParentEmail(parentEmail, parentPhone) {
   return `parent_${suffix}@noemail.local`;
 }
 
+/**
+ * Normalize phone for consistent uniqueness checks
+ */
+function normalizePhone(v) {
+  const s = v == null ? "" : String(v).trim();
+  if (!s) return null;
+  // keep digits + leading plus, but simplest: digits only for matching
+  const digits = s.replace(/\D/g, "");
+  return digits || null;
+}
+
 /* =========================
    Common include (FIXED casing only)
 ========================= */
 const studentInclude = {
-  tenant: true, // ✅ was Tenant
+  tenant: true,
   bus: true,
   parent: { include: { user: true } },
 };
@@ -107,7 +118,7 @@ router.get("/", authMiddleware, async (req, res) => {
     if (!tenantId) return;
 
     const students = await prisma.student.findMany({
-      where: { tenantId }, // ✅ was TenantId
+      where: { tenantId },
       include: studentInclude,
       orderBy: { id: "desc" },
     });
@@ -128,7 +139,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
     if (!studentId) return res.status(400).json({ success: false, message: "Invalid student id" });
 
     const student = await prisma.student.findFirst({
-      where: { id: studentId, tenantId }, // ✅ fixed
+      where: { id: studentId, tenantId },
       include: studentInclude,
     });
 
@@ -140,7 +151,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ CREATE student (tenant scoped, parent auto-create if needed)
+// ✅ CREATE student (tenant scoped, parent auto-create if needed, NO DUPLICATION)
 router.post("/", authMiddleware, async (req, res) => {
   try {
     const tenantId = requireTenant(req, res);
@@ -180,62 +191,118 @@ router.post("/", authMiddleware, async (req, res) => {
 
     // Ensure bus belongs to this tenant
     const bus = await prisma.bus.findFirst({
-      where: { id: busIdNum, tenantId }, // ✅ fixed
+      where: { id: busIdNum, tenantId },
       select: { id: true },
     });
     if (!bus) {
       return res.status(400).json({ success: false, message: "Invalid busId (not found for this tenant)" });
     }
 
-    // Find parent by user within same tenant
-    let parent = null;
-
-    if (parentPhone || parentEmail) {
-      parent = await prisma.parent.findFirst({
-        where: {
-          tenantId, // ✅ scope parent itself too
-          user: {
-            tenantId,
-            OR: [
-              parentPhone ? { phone: String(parentPhone).trim() } : undefined,
-              parentEmail ? { email: String(parentEmail).trim() } : undefined,
-            ].filter(Boolean),
-          },
-        },
-        include: { user: true },
-      });
-    }
+    const phoneNorm = normalizePhone(parentPhone);
+    const emailNorm = parentEmail ? String(parentEmail).trim() : null;
 
     const created = await prisma.$transaction(async (tx) => {
-      // Create parent user + parent if missing
-      if (!parent) {
-        const hashed = await bcrypt.hash(String(parentPassword || "changeme"), 10);
+      // -----------------------------
+      // 1) Find existing user (NO DUPLICATION)
+      // -----------------------------
+      let user = null;
 
-        // ✅ FIX: User.email is required by schema => never null
+      if (emailNorm) {
+        user = await tx.user.findFirst({
+          where: { tenantId, email: emailNorm },
+        });
+      }
+      if (!user && phoneNorm) {
+        // phone in DB may include formatting; do a direct match on raw provided too
+        // If you store phones formatted, ensure you store normalized; otherwise use exact string match
+        user = await tx.user.findFirst({
+          where: {
+            tenantId,
+            OR: [
+              { phone: parentPhone ? String(parentPhone).trim() : null },
+              { phone: phoneNorm },
+            ],
+          },
+        });
+      }
+
+      // -----------------------------
+      // 2) Create user if missing
+      // -----------------------------
+      if (!user) {
+        const hashed = await bcrypt.hash(String(parentPassword || "changeme"), 10);
         const safeEmail = buildSafeParentEmail(parentEmail, parentPhone);
 
-        const user = await tx.user.create({
+        user = await tx.user.create({
           data: {
             name: String(parentName || "Parent").trim(),
-            email: safeEmail, // ✅ always string (never null)
+            email: safeEmail,
             phone: parentPhone ? String(parentPhone).trim() : null,
             password: hashed,
             role: "PARENT",
-            tenantId, // ✅ fixed
+            tenantId,
           },
         });
+      } else {
+        // Keep user up to date without breaking unique constraints
+        const updateData = {};
+        if (parentName) updateData.name = String(parentName).trim();
 
-        // ✅ FIX: Parent expects userId, NOT nested user connect
+        // Only set email if provided OR currently empty (but schema requires it so it won't be empty)
+        if (emailNorm) updateData.email = emailNorm;
+
+        // Only set phone if provided
+        if (parentPhone !== undefined) updateData.phone = parentPhone ? String(parentPhone).trim() : null;
+
+        if (Object.keys(updateData).length) {
+          user = await tx.user.update({ where: { id: user.id }, data: updateData });
+        }
+      }
+
+      // -----------------------------
+      // 3) Find or create Parent for that user (NO DUPLICATION)
+      // -----------------------------
+      let parent = await tx.parent.findFirst({
+        where: { tenantId, userId: user.id },
+        include: { user: true },
+      });
+
+      if (!parent) {
         parent = await tx.parent.create({
           data: {
-            tenantId,       // ✅ important
-            userId: user.id // ✅ correct per schema
+            tenantId,
+            userId: user.id, // ✅ correct per schema
           },
           include: { user: true },
         });
       }
 
-      // Create student
+      // -----------------------------
+      // 4) Optional: prevent duplicate student record (NO DUPLICATION)
+      //     (soft check; you can tighten based on your own business rules)
+      // -----------------------------
+      const existingStudent = await tx.student.findFirst({
+        where: {
+          tenantId,
+          busId: busIdNum,
+          name: String(name).trim(),
+          grade: String(grade).trim(),
+          parentId: parent.id,
+        },
+        select: { id: true },
+      });
+
+      if (existingStudent) {
+        // return the existing student rather than creating a duplicate
+        return await tx.student.findFirst({
+          where: { id: existingStudent.id, tenantId },
+          include: studentInclude,
+        });
+      }
+
+      // -----------------------------
+      // 5) Create student
+      // -----------------------------
       const student = await tx.student.create({
         data: {
           name: String(name).trim(),
@@ -243,7 +310,7 @@ router.post("/", authMiddleware, async (req, res) => {
           latitude: latNum,
           longitude: lngNum,
           busId: busIdNum,
-          tenantId, // ✅ fixed
+          tenantId,
           parentId: parent.id,
         },
         include: studentInclude,
@@ -258,7 +325,7 @@ router.post("/", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ UPDATE student (tenant scoped + optional parent update)
+// ✅ UPDATE student (tenant scoped + optional parent update, NO DUPLICATION)
 router.put("/:id", authMiddleware, async (req, res) => {
   try {
     const tenantId = requireTenant(req, res);
@@ -311,7 +378,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
       if (parentName || parentPhone !== undefined || parentEmail !== undefined || parentPassword) {
         let parent = existing.parent;
 
-        // If no parent, create + link
+        // If no parent, create + link (NO DUPLICATION: tie to a user if possible)
         if (!parent) {
           parent = await tx.parent.create({
             data: { tenantId },
@@ -320,43 +387,54 @@ router.put("/:id", authMiddleware, async (req, res) => {
           await tx.student.update({ where: { id: studentId }, data: { parentId: parent.id } });
         }
 
-        // If no user, create one
+        // If no user, find existing or create one
         if (!parent.user) {
           const hashed = await bcrypt.hash(String(parentPassword || "changeme"), 10);
-
-          // ✅ FIX: User.email is required by schema => never null
           const safeEmail = buildSafeParentEmail(parentEmail, parentPhone);
 
-          const user = await tx.user.create({
-            data: {
-              name: String(parentName || "Parent").trim(),
-              phone: parentPhone ? String(parentPhone).trim() : null,
-              email: safeEmail, // ✅ always string
-              password: hashed,
-              role: "PARENT",
-              tenantId,
-            },
-          });
+          // Try reuse user first
+          let user = null;
+          const emailNorm = parentEmail ? String(parentEmail).trim() : null;
+          const phoneNorm = normalizePhone(parentPhone);
 
-          // ✅ FIX: Parent expects userId, NOT nested user connect
+          if (emailNorm) user = await tx.user.findFirst({ where: { tenantId, email: emailNorm } });
+          if (!user && phoneNorm) {
+            user = await tx.user.findFirst({
+              where: {
+                tenantId,
+                OR: [
+                  { phone: parentPhone ? String(parentPhone).trim() : null },
+                  { phone: phoneNorm },
+                ],
+              },
+            });
+          }
+
+          if (!user) {
+            user = await tx.user.create({
+              data: {
+                name: String(parentName || "Parent").trim(),
+                phone: parentPhone ? String(parentPhone).trim() : null,
+                email: safeEmail,
+                password: hashed,
+                role: "PARENT",
+                tenantId,
+              },
+            });
+          }
+
           await tx.parent.update({
             where: { id: parent.id },
-            data: { userId: user.id },
+            data: { userId: user.id }, // ✅ correct per schema
           });
         } else {
           const updateData = {};
 
           if (parentName) updateData.name = String(parentName).trim();
           if (parentPhone !== undefined) updateData.phone = parentPhone ? String(parentPhone).trim() : null;
-
-          // ✅ FIX: email cannot be null in schema
-          if (parentEmail !== undefined) {
-            updateData.email = buildSafeParentEmail(parentEmail, parentPhone ?? parent.user.phone);
-          }
-
+          if (parentEmail !== undefined) updateData.email = buildSafeParentEmail(parentEmail, parentPhone ?? parent.user.phone);
           if (parentPassword) updateData.password = await bcrypt.hash(String(parentPassword), 10);
 
-          // enforce tenant
           updateData.tenantId = tenantId;
 
           if (Object.keys(updateData).length) {
