@@ -217,7 +217,7 @@ router.post("/", authMiddleware, async (req, res) => {
         const user = await tx.user.create({
           data: {
             name: String(parentName || "Parent").trim(),
-            email: safeEmail, // ✅ was nullable; now always string
+            email: safeEmail, // ✅ always string (never null)
             phone: parentPhone ? String(parentPhone).trim() : null,
             password: hashed,
             role: "PARENT",
@@ -225,10 +225,11 @@ router.post("/", authMiddleware, async (req, res) => {
           },
         });
 
+        // ✅ FIX: Parent expects userId, NOT nested user connect
         parent = await tx.parent.create({
           data: {
-            tenantId, // ✅ important
-            user: { connect: { id: user.id } },
+            tenantId,       // ✅ important
+            userId: user.id // ✅ correct per schema
           },
           include: { user: true },
         });
@@ -330,16 +331,17 @@ router.put("/:id", authMiddleware, async (req, res) => {
             data: {
               name: String(parentName || "Parent").trim(),
               phone: parentPhone ? String(parentPhone).trim() : null,
-              email: safeEmail, // ✅ was nullable; now always string
+              email: safeEmail, // ✅ always string
               password: hashed,
               role: "PARENT",
               tenantId,
             },
           });
 
+          // ✅ FIX: Parent expects userId, NOT nested user connect
           await tx.parent.update({
             where: { id: parent.id },
-            data: { user: { connect: { id: user.id } } },
+            data: { userId: user.id },
           });
         } else {
           const updateData = {};
