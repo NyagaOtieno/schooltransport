@@ -73,6 +73,20 @@ function prismaError(res, err, fallback = "Server error") {
   });
 }
 
+/**
+ * Required by schema: User.email is String (NOT nullable).
+ * If parentEmail is missing, we generate a safe placeholder email from phone/time.
+ * (kept as helper, no functions removed)
+ */
+function buildSafeParentEmail(parentEmail, parentPhone) {
+  const email = parentEmail ? String(parentEmail).trim() : "";
+  if (email) return email;
+
+  const phoneDigits = String(parentPhone || "").replace(/\D/g, "");
+  const suffix = phoneDigits || String(Date.now());
+  return `parent_${suffix}@noemail.local`;
+}
+
 /* =========================
    Common include (FIXED casing only)
 ========================= */
@@ -197,10 +211,13 @@ router.post("/", authMiddleware, async (req, res) => {
       if (!parent) {
         const hashed = await bcrypt.hash(String(parentPassword || "changeme"), 10);
 
+        // ✅ FIX: User.email is required by schema => never null
+        const safeEmail = buildSafeParentEmail(parentEmail, parentPhone);
+
         const user = await tx.user.create({
           data: {
             name: String(parentName || "Parent").trim(),
-            email: parentEmail ? String(parentEmail).trim() : null,
+            email: safeEmail, // ✅ was nullable; now always string
             phone: parentPhone ? String(parentPhone).trim() : null,
             password: hashed,
             role: "PARENT",
@@ -305,11 +322,15 @@ router.put("/:id", authMiddleware, async (req, res) => {
         // If no user, create one
         if (!parent.user) {
           const hashed = await bcrypt.hash(String(parentPassword || "changeme"), 10);
+
+          // ✅ FIX: User.email is required by schema => never null
+          const safeEmail = buildSafeParentEmail(parentEmail, parentPhone);
+
           const user = await tx.user.create({
             data: {
               name: String(parentName || "Parent").trim(),
               phone: parentPhone ? String(parentPhone).trim() : null,
-              email: parentEmail ? String(parentEmail).trim() : null,
+              email: safeEmail, // ✅ was nullable; now always string
               password: hashed,
               role: "PARENT",
               tenantId,
@@ -325,7 +346,12 @@ router.put("/:id", authMiddleware, async (req, res) => {
 
           if (parentName) updateData.name = String(parentName).trim();
           if (parentPhone !== undefined) updateData.phone = parentPhone ? String(parentPhone).trim() : null;
-          if (parentEmail !== undefined) updateData.email = parentEmail ? String(parentEmail).trim() : null;
+
+          // ✅ FIX: email cannot be null in schema
+          if (parentEmail !== undefined) {
+            updateData.email = buildSafeParentEmail(parentEmail, parentPhone ?? parent.user.phone);
+          }
+
           if (parentPassword) updateData.password = await bcrypt.hash(String(parentPassword), 10);
 
           // enforce tenant
