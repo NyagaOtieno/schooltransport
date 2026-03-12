@@ -9,13 +9,11 @@
     "start": "node ./server.js",
     "build": "echo 'No build step needed for Express backend'",
     "postinstall": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:generate": "prisma generate",
+       "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
     "prisma:seed": "node prisma/seed.js",
-    "seed": "node prisma/seed.js",
-    "reset": "prisma migrate reset --force --skip-generate --skip-seed && npm run prisma:migrate && npm run seed"
-  },
+    "seed": "node prisma/seed.js"
+   },
   "prisma": {
     "seed": "node prisma/seed.js"
   },

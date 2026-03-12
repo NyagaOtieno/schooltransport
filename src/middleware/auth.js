@@ -31,10 +31,17 @@ export const authMiddleware = (req, res, next) => {
     const token = extractBearerToken(req);
 
     if (!token) {
+      console.error("AUTH ERROR: Missing bearer token");
       return res.status(401).json({ error: "Unauthorized. Bearer token required." });
     }
 
     const decoded = jwt.verify(token, jwtSecret);
+
+    console.log("AUTH OK:", {
+      userId: decoded.userId ?? decoded.id ?? decoded.user?.id,
+      tenantId: decoded.tenantId ?? decoded.TenantId ?? decoded.schoolId ?? decoded.school?.id,
+      role: decoded.role,
+    });
 
     const rawUserId = decoded.userId ?? decoded.id ?? decoded.user?.id;
     const rawTenantId =
@@ -55,11 +62,14 @@ export const authMiddleware = (req, res, next) => {
     };
 
     if (!req.user.userId) {
+      console.error("AUTH ERROR: Token verified but userId missing", decoded);
       return res.status(401).json({ error: "Unauthorized: token missing valid userId." });
     }
 
     return next();
   } catch (error) {
+    console.error("AUTH VERIFY ERROR:", error.name, error.message);
+
     if (error.name === "TokenExpiredError") {
       return res.status(403).json({ error: "Token expired." });
     }
@@ -68,7 +78,6 @@ export const authMiddleware = (req, res, next) => {
       return res.status(403).json({ error: "Invalid token." });
     }
 
-    console.error("AUTH ERROR:", error);
     return res.status(500).json({ error: "Authentication failed." });
   }
 };
