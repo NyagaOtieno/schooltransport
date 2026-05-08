@@ -1,6 +1,6 @@
+import prisma from "../middleware/prisma.js";
 // src/controllers/wallet.controller.js
 
-import prisma from "../middleware/prisma.js";
 import { BillingEngine } from "../services/billing/billing.engine.js";
 
 /**
@@ -56,7 +56,9 @@ export const balance = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: { balance: amount },
+      data: {
+        balance: amount,
+      },
     });
   } catch (err) {
     console.error("[wallet.balance]", err);
@@ -66,19 +68,17 @@ export const balance = async (req, res) => {
     });
   }
 };
-
 /**
  * GET /api/wallet/transactions
- * Paginated wallet transaction history
+ * Returns paginated transaction history for the authenticated user's wallet.
  */
 export const transactions = async (req, res) => {
   try {
-    const user = req.user;
+    const user   = req.user;
+    const page   = Math.max(1, Number(req.query.page)  || 1);
+    const limit  = Math.min(50, Number(req.query.limit) || 20);
 
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.min(50, Number(req.query.limit) || 20);
-
-    // Find wallet linked to user (parent or client)
+    // Find the wallet for this parent/client
     const wallet = await prisma.wallet.findFirst({
       where: {
         OR: [
@@ -89,37 +89,19 @@ export const transactions = async (req, res) => {
     });
 
     if (!wallet) {
-      return res.status(200).json({
-        success: true,
-        data: [],
-        page,
-        limit,
-      });
+      return res.json({ success: true, data: [], page, limit });
     }
 
     const txs = await prisma.transaction.findMany({
-      where: { walletId: wallet.id },
+      where:   { walletId: wallet.id },
       orderBy: { createdAt: "desc" },
-      skip: (page - 1) * limit,
-      take: limit,
+      skip:    (page - 1) * limit,
+      take:    limit,
     });
 
-    const total = await prisma.transaction.count({
-      where: { walletId: wallet.id },
-    });
-
-    return res.status(200).json({
-      success: true,
-      data: txs,
-      page,
-      limit,
-      total,
-    });
+    return res.json({ success: true, data: txs, page, limit });
   } catch (err) {
     console.error("[wallet.transactions]", err);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to retrieve transactions.",
-    });
+    return res.status(500).json({ success: false, message: "Failed to retrieve transactions." });
   }
 };

@@ -32,7 +32,7 @@ import { startBillingCron } from "./jobs/billing.cron.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
 import trackingRoutes from "./routes/trackingRoutes.js";
 import walletRoutes from "./routes/wallet.routes.js";
-import agentRoutes from "./routes/agentRoutes.js";
+import agentRoutes from "./routes/agent.routes.js";
 
 startBillingCron();
 const app = express();
