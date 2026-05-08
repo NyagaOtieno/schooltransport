@@ -1,0 +1,112 @@
+{
+  "info": {
+    "_postman_id": "f4c4a1b3-asset-track-collection",
+    "name": "TrackMy Platform (Kid + Asset)",
+    "description": "Unified API collection for TrackMyKid and TrackMyAsset",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://schooltransport-production.up.railway.app"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+
+    {
+      "name": "Assets",
+      "item": [
+        {
+          "name": "Get All Assets",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/assets"
+          }
+        },
+        {
+          "name": "Create Asset",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Generator A\",\n  \"type\": \"GENERATOR\",\n  \"tag\": \"GEN-001\",\n  \"schoolId\": 1\n}"
+            },
+            "url": "{{baseUrl}}/api/assets"
+          }
+        },
+        {
+          "name": "Get Asset by ID",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/assets/1"
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Manifests",
+      "item": [
+        {
+          "name": "Get All Manifests",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/manifests"
+          }
+        },
+        {
+          "name": "Create Manifest (STUDENT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"studentId\": 1,\n  \"busId\": 1,\n  \"assistantId\": 2,\n  \"status\": \"onBoard\",\n  \"latitude\": -1.286389,\n  \"longitude\": 36.817223\n}"
+            },
+            "url": "{{baseUrl}}/api/manifests"
+          }
+        },
+        {
+          "name": "Create Manifest (ASSET)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assetId\": 1,\n  \"busId\": 1,\n  \"assistantId\": 2,\n  \"status\": \"onBoard\",\n  \"latitude\": -1.286389,\n  \"longitude\": 36.817223\n}"
+            },
+            "url": "{{baseUrl}}/api/manifests"
+          }
+        },
+        {
+          "name": "Update Manifest Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"offBoard\"\n}"
+            },
+            "url": "{{baseUrl}}/api/manifests/1"
+          }
+        }
+      ]
+    }
+  ]
+}
