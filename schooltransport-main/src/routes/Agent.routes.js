@@ -19,6 +19,8 @@ import {
   getAdminWalletTransactions,
 } from "../controllers/agent.controller.js";
 
+console.log("✅ Agent routes loaded");
+
 const router = express.Router();
 
 // ── Public: one-time platform bootstrap ────────────────────────────
