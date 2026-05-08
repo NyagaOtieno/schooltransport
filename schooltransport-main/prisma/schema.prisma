@@ -7,6 +7,8 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ─── PLATFORM / TENANT ───────────────────────────────────────────────────────
+
 model Tenant {
   id        Int      @id @default(autoincrement())
   name      String
@@ -23,12 +25,15 @@ model Tenant {
   assets      Asset[]
   parents     Parent[]
   clients     Client[]
-  agents      Agent[]
   panicEvents PanicEvent[]
-  AgentTenant AgentTenant[]
+
+  // Agent relationship — tracks which agent onboarded this school
+  agentTenants AgentTenant[]
 
   @@index([mode])
 }
+
+// ─── USER ────────────────────────────────────────────────────────────────────
 
 model User {
   id       Int     @id @default(autoincrement())
@@ -38,6 +43,8 @@ model User {
   role     Role
   password String
 
+  // Nullable: AGENT users are platform-level and have tenantId = null
+  // SYSTEM_ADMIN users also have tenantId = null
   tenantId Int?
   tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -62,11 +69,16 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Tenant-scoped uniqueness for tenant users
+  // NULLs are not considered equal in PostgreSQL unique constraints so
+  // platform-level users (tenantId = null) naturally bypass this.
   @@unique([email, tenantId])
   @@unique([phone, tenantId])
   @@index([tenantId])
   @@index([role])
 }
+
+// ─── PARENT ──────────────────────────────────────────────────────────────────
 
 model Parent {
   id       Int  @id @default(autoincrement())
@@ -90,6 +102,8 @@ model Parent {
   @@index([tenantId])
 }
 
+// ─── CLIENT ──────────────────────────────────────────────────────────────────
+
 model Client {
   id       Int  @id @default(autoincrement())
   tenantId Int
@@ -111,6 +125,75 @@ model Client {
 
   @@index([tenantId])
 }
+
+// ─── AGENT (platform-level sales agent) ──────────────────────────────────────
+
+model Agent {
+  id     Int   @id @default(autoincrement())
+  userId Int   @unique
+  user   User  @relation("UserToAgent", fields: [userId], references: [id], onDelete: Cascade)
+
+  commissionRate Float   @default(0.10)  // 10% of subscription revenue
+  isActive       Boolean @default(true)
+
+  wallet  AgentWallet?
+  tenants AgentTenant[]  // schools this agent manages
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Agent ↔ Tenant many-to-many (one agent can manage many schools)
+model AgentTenant {
+  id       Int @id @default(autoincrement())
+  agentId  Int
+  tenantId Int
+
+  agent  Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  onboardedAt DateTime @default(now())
+
+  @@unique([agentId, tenantId])
+  @@index([agentId])
+  @@index([tenantId])
+}
+
+// Agent-specific wallet (separate from Parent/Client wallets)
+model AgentWallet {
+  id      Int   @id @default(autoincrement())
+  agentId Int   @unique
+  agent   Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  balance Float @default(0)
+
+  transactions AgentTransaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Agent transaction ledger
+model AgentTransaction {
+  id       Int         @id @default(autoincrement())
+  walletId Int
+  wallet   AgentWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  type          AgentTxType
+  amount        Float
+  reference     String?  @unique
+  description   String?
+  balanceBefore Float
+  balanceAfter  Float
+
+  createdAt DateTime @default(now())
+
+  @@index([walletId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ─── BUS ─────────────────────────────────────────────────────────────────────
 
 model Bus {
   id          Int      @id @default(autoincrement())
@@ -139,6 +222,8 @@ model Bus {
   @@index([tenantId])
 }
 
+// ─── STUDENT ─────────────────────────────────────────────────────────────────
+
 model Student {
   id        Int    @id @default(autoincrement())
   name      String
@@ -160,16 +245,16 @@ model Student {
   parent Parent? @relation(fields: [parentId], references: [id], onDelete: SetNull)
   user   User?   @relation("UserStudent", fields: [userId], references: [id], onDelete: SetNull)
 
-  manifests   Manifest[]
-  panicEvents PanicEvent[]
-
-  // 🔥 Monetization
+  manifests     Manifest[]
+  panicEvents   PanicEvent[]
   subscriptions Subscription[]
 
   @@index([tenantId])
   @@index([busId])
   @@index([parentId])
 }
+
+// ─── ASSET ───────────────────────────────────────────────────────────────────
 
 model Asset {
   id   Int     @id @default(autoincrement())
@@ -198,16 +283,16 @@ model Asset {
   client Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
   bus    Bus?    @relation(fields: [busId], references: [id], onDelete: SetNull)
 
-  manifests   Manifest[]
-  panicEvents PanicEvent[]
-
-  // 🔥 Monetization
+  manifests     Manifest[]
+  panicEvents   PanicEvent[]
   subscriptions Subscription[]
 
   @@index([tenantId])
   @@index([busId])
   @@index([clientId])
 }
+
+// ─── MANIFEST ────────────────────────────────────────────────────────────────
 
 model Manifest {
   id          Int  @id @default(autoincrement())
@@ -239,6 +324,8 @@ model Manifest {
   @@index([studentId, createdAt])
 }
 
+// ─── NOTIFICATION ─────────────────────────────────────────────────────────────
+
 model Notification {
   id       Int  @id @default(autoincrement())
   parentId Int?
@@ -257,6 +344,8 @@ model Notification {
   @@index([parentId])
   @@index([clientId])
 }
+
+// ─── LOCATION MODELS ──────────────────────────────────────────────────────────
 
 model BusLocation {
   id       Int @id @default(autoincrement())
@@ -302,6 +391,8 @@ model LiveLocation {
   @@index([vehicleReg])
 }
 
+// ─── PANIC ───────────────────────────────────────────────────────────────────
+
 model PanicEvent {
   id       Int  @id @default(autoincrement())
   userId   Int
@@ -330,87 +421,7 @@ model PanicEvent {
   @@index([tenantId])
 }
 
-enum AgentTxType {
-  COMMISSION
-  WITHDRAWAL
-  TOPUP
-  ADJUSTMENT
-}
-
-//////////////////////////////////////////////////////
-// 🤝 AGENT SYSTEM
-//////////////////////////////////////////////////////
-
-model Agent {
-  id             Int     @id @default(autoincrement())
-  userId         Int     @unique
-  commissionRate Float   @default(0.10)
-  isActive       Boolean @default(true)
-
-  user    User          @relation("UserToAgent", fields: [userId], references: [id], onDelete: Cascade)
-  wallet  AgentWallet?
-  tenants AgentTenant[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  Tenant    Tenant?  @relation(fields: [tenantId], references: [id])
-  tenantId  Int?
-
-  @@index([userId])
-}
-
-model AgentWallet {
-  id      Int   @id @default(autoincrement())
-  agentId Int   @unique
-  balance Float @default(0)
-
-  agent        Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  transactions AgentTransaction[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([agentId])
-}
-
-model AgentTransaction {
-  id          Int         @id @default(autoincrement())
-  walletId    Int
-  type        AgentTxType
-  amount      Float
-  reference   String?     @unique
-  description String?
-
-  balanceBefore Float
-  balanceAfter  Float
-
-  wallet AgentWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-
-  @@index([walletId])
-  @@index([type])
-  @@index([createdAt])
-}
-
-model AgentTenant {
-  id       Int @id @default(autoincrement())
-  agentId  Int
-  tenantId Int
-
-  agent  Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  onboardedAt DateTime @default(now())
-
-  @@unique([agentId, tenantId])
-  @@index([agentId])
-  @@index([tenantId])
-}
-
-//////////////////////////////////////////////////////
-// 💰 MONETIZATION MODELS
-//////////////////////////////////////////////////////
+// ─── MONETIZATION ────────────────────────────────────────────────────────────
 
 model Wallet {
   id       Int  @id @default(autoincrement())
@@ -457,7 +468,7 @@ model Subscription {
 }
 
 model Transaction {
-  id Int @id @default(autoincrement())
+  id       Int @id @default(autoincrement())
 
   parentId Int?
   clientId Int?
@@ -485,7 +496,7 @@ model Transaction {
 }
 
 model Ledger {
-  id Int @id @default(autoincrement())
+  id     Int    @id @default(autoincrement())
 
   walletId Int
   wallet   Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
@@ -496,7 +507,7 @@ model Ledger {
   balanceBefore Float
   balanceAfter  Float
 
-  reference   String? @unique
+  reference   String?  @unique
   description String?
 
   transactionId Int?
@@ -508,19 +519,24 @@ model Ledger {
   @@index([transactionId])
 }
 
-//////////////////////////////////////////////////////
-// ENUMS
-//////////////////////////////////////////////////////
+// ─── ENUMS ───────────────────────────────────────────────────────────────────
 
 enum Role {
-  SYSTEM_ADMIN
-  AGENT
   ADMIN
   DRIVER
   ASSISTANT
   PARENT
   CLIENT
   MERCHANT
+  AGENT          // Platform-level sales agent (tenantId = null)
+  SYSTEM_ADMIN   // Platform super-admin (tenantId = null)
+}
+
+enum AgentTxType {
+  COMMISSION
+  WITHDRAWAL
+  TOPUP
+  ADJUSTMENT
 }
 
 enum ManifestStatus {
@@ -557,8 +573,7 @@ enum SubscriptionType {
   DAILY
   WEEKLY
   MONTHLY
-  QUARTERLY
-  ANNUALLY
+  ANNUAL
 }
 
 enum SubscriptionStatus {

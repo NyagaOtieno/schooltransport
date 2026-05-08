@@ -17,7 +17,7 @@ import {
   getAgentTransactions,
   getAdminWalletBalance,
   getAdminWalletTransactions,
-} from "../controllers/agentController.js";
+} from "../controllers/agent.controller.js";
 
 const router = express.Router();
 
