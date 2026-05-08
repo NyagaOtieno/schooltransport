@@ -56,23 +56,35 @@ export const register = async (req, res) => {
     const tenantId = resolveTenantId(req.body);
 
     const platformRoles = ["AGENT", "SYSTEM_ADMIN"];
-    if (!name || !email || !password || !role) {
-      return res.status(400).json({
-        error: "name, email, password, and role are required",
-      });
-    }
 
-    if (!ALLOWED_ROLES.includes(role)) {
-      return res.status(400).json({
-        error: `Invalid role. Allowed: ${ALLOWED_ROLES.join(", ")}`,
-      });
-    }
+// 🚫 Block SYSTEM_ADMIN from normal register
+if (role === "SYSTEM_ADMIN") {
+  return res.status(403).json({
+    error: "SYSTEM_ADMIN can only be created via bootstrap endpoint",
+  });
+}
 
-    // ✅ Confirm tenant exists
-    const tenant = await prisma.tenant.findUnique({ where: { id: Number(tenantId) } });
-    if (!tenant) {
-      return res.status(400).json({ error: "Tenant does not exist" });
-    }
+// 🚫 (Recommended) Block AGENT self-registration
+if (role === "AGENT") {
+  return res.status(403).json({
+    error: "AGENT must be created by system admin",
+  });
+}
+
+// ✅ Only require tenant for non-platform users
+if (!platformRoles.includes(role)) {
+  if (!tenantId) {
+    return res.status(400).json({ error: "tenantId is required for this role" });
+  }
+
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: Number(tenantId) },
+  });
+
+  if (!tenant) {
+    return res.status(400).json({ error: "Tenant does not exist" });
+  }
+}
 
     // ✅ Check for existing user in same tenant
     const existingUser = await prisma.user.findFirst({
