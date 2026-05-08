@@ -1,0 +1,255 @@
+{
+  "info": {
+    "name": "Student Bus Tracking API (Full CRUD with Schools)",
+    "_postman_id": "9c0c6d99-8c9e-43e2-8fbb-abcdef112233",
+    "description": "Complete Postman collection with CRUD operations for Schools, Users, Buses, Parents/Students, and Manifests (check-in/out) using live backend deployed on Railway.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://schooltransport-production.up.railway.app" },
+    { "key": "token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "AUTH",
+      "item": [
+        {
+          "name": "Register Admin",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Admin One\",\n  \"email\": \"admin@goshule.com\",\n  \"password\": \"123456\",\n  \"role\": \"ADMIN\",\n  \"schoolId\": 1\n}"
+            },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/auth/register", "host": ["{{baseUrl}}"], "path": ["api", "auth", "register"] }
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@goshule.com\",\n  \"password\": \"123456\"\n}"
+            },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "SCHOOLS",
+      "item": [
+        {
+          "name": "Create School",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Goshule Academy\",\n  \"logoUrl\": \"https://example.com/logo.png\",\n  \"address\": \"Nairobi, Kenya\",\n  \"phone\": \"+254700000000\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/schools", "host": ["{{baseUrl}}"], "path": ["api", "schools"] }
+          }
+        },
+        {
+          "name": "List Schools",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/schools" }
+        },
+        {
+          "name": "Get School by ID",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/schools/1" }
+        },
+        {
+          "name": "Update School",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Goshule Academy Updated\",\n  \"logoUrl\": \"https://example.com/logo-new.png\",\n  \"address\": \"Nairobi West, Kenya\",\n  \"phone\": \"+254711111111\"\n}"
+            },
+            "url": "{{baseUrl}}/api/schools/1"
+          }
+        },
+        {
+          "name": "Delete School",
+          "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/schools/1" }
+        }
+      ]
+    },
+    {
+      "name": "USERS",
+      "item": [
+        {
+          "name": "Create Driver",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Driver One\",\n  \"email\": \"driver1@goshule.com\",\n  \"password\": \"123456\",\n  \"role\": \"DRIVER\",\n  \"schoolId\": 1\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/register"
+          }
+        },
+        {
+          "name": "List Users",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/users" }
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{ \"name\": \"Driver Updated\", \"phone\": \"+254722222222\" }" },
+            "url": "{{baseUrl}}/api/users/1"
+          }
+        },
+        {
+          "name": "Delete User",
+          "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/users/1" }
+        }
+      ]
+    },
+    {
+      "name": "BUSES",
+      "item": [
+        {
+          "name": "Create Bus",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bus A\",\n  \"plateNumber\": \"KAA123A\",\n  \"capacity\": 40,\n  \"route\": \"Route 1\",\n  \"driverId\": 2,\n  \"assistantId\": 3,\n  \"schoolId\": 1\n}"
+            },
+            "url": "{{baseUrl}}/api/buses"
+          }
+        },
+        {
+          "name": "List Buses",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/buses" }
+        },
+        {
+          "name": "Update Bus",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bus A Updated\",\n  \"plateNumber\": \"KAA123B\",\n  \"capacity\": 45,\n  \"route\": \"Route 1B\"\n}"
+            },
+            "url": "{{baseUrl}}/api/buses/1"
+          }
+        },
+        {
+          "name": "Delete Bus",
+          "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/buses/1" }
+        }
+      ]
+    },
+    {
+      "name": "PARENTS & STUDENTS",
+      "item": [
+        {
+          "name": "Create Parent & Student",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parentName\": \"John Doe\",\n  \"parentPhone\": \"0712345678\",\n  \"parentEmail\": \"john@example.com\",\n  \"studentName\": \"Jane Doe\",\n  \"grade\": \"Grade 4\",\n  \"latitude\": -1.27231,\n  \"longitude\": 36.82767,\n  \"busId\": 1,\n  \"schoolId\": 1\n}"
+            },
+            "url": "{{baseUrl}}/api/parents"
+          }
+        },
+        {
+          "name": "List Parents/Students",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/parents" }
+        },
+        {
+          "name": "Update Parent/Student",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parentName\": \"John Doe Updated\",\n  \"parentPhone\": \"0712345679\",\n  \"studentName\": \"Jane Doe Updated\",\n  \"grade\": \"Grade 5\"\n}"
+            },
+            "url": "{{baseUrl}}/api/parents/1"
+          }
+        },
+        {
+          "name": "Delete Parent/Student",
+          "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/parents/1" }
+        }
+      ]
+    },
+    {
+      "name": "MANIFESTS",
+      "item": [
+        {
+          "name": "Check-In",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"studentId\": 1,\n  \"busId\": 1,\n  \"assistantId\": 3,\n  \"latitude\": -1.27231,\n  \"longitude\": 36.82767\n}"
+            },
+            "url": "{{baseUrl}}/api/manifests/checkin"
+          }
+        },
+        {
+          "name": "Check-Out",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"studentId\": 1,\n  \"busId\": 1,\n  \"assistantId\": 3,\n  \"latitude\": -1.27231,\n  \"longitude\": 36.82767\n}"
+            },
+            "url": "{{baseUrl}}/api/manifests/checkout"
+          }
+        },
+        {
+          "name": "List Manifests",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/manifests" }
+        }
+      ]
+    }
+  ]
+}
