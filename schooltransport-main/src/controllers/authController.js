@@ -64,7 +64,7 @@ if (role === "SYSTEM_ADMIN") {
   });
 }
 
-// 🚫 (Recommended) Block AGENT self-registration
+// 🚫 Block AGENT self-registration (must be created by admin)
 if (role === "AGENT") {
   return res.status(403).json({
     error: "AGENT must be created by system admin",
@@ -72,6 +72,7 @@ if (role === "AGENT") {
 }
 
 // ✅ Only require tenant for non-platform users
+
 if (!platformRoles.includes(role)) {
   if (!tenantId) {
     return res.status(400).json({ error: "tenantId is required for this role" });
@@ -87,12 +88,12 @@ if (!platformRoles.includes(role)) {
 }
 
     // ✅ Check for existing user in same tenant
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        TenantId: Number(tenantId), // 👈 matches your schema
-        OR: [{ email }, ...(phone ? [{ phone }] : [])],
-      },
-    });
+const existingUser = await prisma.user.findFirst({
+  where: {
+    TenantId: platformRoles.includes(role) ? null : Number(tenantId),
+    OR: [{ email }, ...(phone ? [{ phone }] : [])],
+  },
+});
 
     if (existingUser) {
       return res.status(409).json({
@@ -103,16 +104,16 @@ if (!platformRoles.includes(role)) {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // ✅ Create user
-    const user = await prisma.user.create({
-      data: {
-        name,
-        email,
-        phone: phone || null,
-        password: hashedPassword,
-        role,
-        TenantId: Number(tenantId),
-      },
-    });
+ const user = await prisma.user.create({
+  data: {
+    name,
+    email,
+    phone: phone || null,
+    password: hashedPassword,
+    role,
+    TenantId: platformRoles.includes(role) ? null : Number(tenantId),
+  },
+});
 
     const token = signToken(user);
     const { password: _, ...userWithoutPassword } = user;
@@ -171,6 +172,11 @@ export const login = async (req, res) => {
     }
 
     if (!user) return res.status(401).json({ error: "Invalid credentials" });
+    if (!tenantId && ["ADMIN", "PARENT"].includes(user.role)) {
+  return res.status(400).json({
+    error: "tenantId is required for this user type",
+  });
+}
 
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: "Invalid credentials" });
