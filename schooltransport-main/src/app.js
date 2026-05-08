@@ -32,8 +32,9 @@ import { startBillingCron } from "./jobs/billing.cron.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
 import trackingRoutes from "./routes/trackingRoutes.js";
 import walletRoutes from "./routes/wallet.routes.js";
-import agentRoutes from "./routes/agent.routes.js";
+import agentRoutes from "./routes/Agent.routes.js";
 
+console.log("🔥 agentRoutes import:", agentRoutes);
 startBillingCron();
 const app = express();
 const PORT = process.env.PORT || 5000;
