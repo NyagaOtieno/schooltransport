@@ -19,7 +19,6 @@ import {
   getAdminWalletTransactions,
 } from "../controllers/agent.controller.js";
 
-console.log("✅ Agent routes loaded");
 console.log("🔥 agent.routes.js LOADED");
 
 const router = express.Router();
