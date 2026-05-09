@@ -19,38 +19,36 @@ import {
   getAdminWalletTransactions,
 } from "../controllers/agent.controller.js";
 
-console.log("🔥 agent.routes.js LOADED");
-
 const router = express.Router();
 
-// ── Public: one-time platform bootstrap ────────────────────────────
-// POST /api/agents/bootstrap-system-admin
-// Protected by SYSTEM_ADMIN_SECRET env var (not JWT)
+// ── Public (no JWT needed — protected by SYSTEM_ADMIN_SECRET) ──────
 router.post("/bootstrap-system-admin", bootstrapSystemAdmin);
 
-// ── All routes below require a valid JWT ───────────────────────────
+// ── All routes below require valid JWT ─────────────────────────────
 router.use(authMiddleware);
 
-// ── Agent CRUD (SYSTEM_ADMIN / ADMIN) ──────────────────────────────
-router.post("/",          createAgent);    // create agent
-router.get("/",           listAgents);     // list all agents
-router.get("/:id",        getAgent);       // get one agent
-router.put("/:id",        updateAgent);    // update agent
-router.delete("/:id",     deleteAgent);    // delete agent
+// ── Specific named routes BEFORE /:id to avoid conflicts ───────────
+router.post("/create-school",            createSchool);
+router.get("/my-schools",                getMySchools);
+router.get("/dashboard",                 getDashboard);
 
-// ── Agent operational endpoints ────────────────────────────────────
-router.post("/create-school", createSchool);  // agent creates school + admin
-router.get("/my-schools",     getMySchools);  // agent's schools
-router.get("/dashboard",      getDashboard);  // agent stats
+// ── Agent wallet (specific paths before /:id) ──────────────────────
+router.get("/wallet/balance",            getAgentBalance);
+router.post("/wallet/topup",             topUpAgentWallet);
+router.post("/wallet/withdraw",          withdrawAgentWallet);
+router.get("/wallet/transactions",       getAgentTransactions);
 
-// ── Agent wallet ────────────────────────────────────────────────────
-router.get("/wallet/balance",       getAgentBalance);
-router.post("/wallet/topup",        topUpAgentWallet);    // SYSTEM_ADMIN credits agent
-router.post("/wallet/withdraw",     withdrawAgentWallet); // agent requests withdrawal
-router.get("/wallet/transactions",  getAgentTransactions);
-
-// ── Admin wallet overview (tenant admin sees parent wallets) ────────
+// ── Admin wallet overview ──────────────────────────────────────────
 router.get("/admin-wallet/balance",      getAdminWalletBalance);
 router.get("/admin-wallet/transactions", getAdminWalletTransactions);
+
+// ── Collection routes ──────────────────────────────────────────────
+router.get("/",    listAgents);   // GET  /api/agents
+router.post("/",   createAgent);  // POST /api/agents
+
+// ── Dynamic :id routes LAST to avoid swallowing named routes ───────
+router.get("/:id",    getAgent);
+router.put("/:id",    updateAgent);
+router.delete("/:id", deleteAgent);
 
 export default router;
