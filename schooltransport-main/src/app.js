@@ -5,6 +5,8 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 
+console.log("🔥 APP.JS LOADED");
+
 dotenv.config();
 
 // -----------------------------
