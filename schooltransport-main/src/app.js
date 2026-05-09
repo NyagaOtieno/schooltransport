@@ -36,7 +36,8 @@ import trackingRoutes from "./routes/trackingRoutes.js";
 import walletRoutes from "./routes/wallet.routes.js";
 import agentRoutes from "./routes/agent.routes.js";
 
-console.log("🔥 agentRoutes import:", agentRoutes);
+console.log("🔥 APP.JS LOADED (NEW VERSION)");
+
 startBillingCron();
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -93,6 +94,7 @@ app.use("/api/parents", parentRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/tracking", trackingRoutes);
 app.use("/api/wallet", walletRoutes);
+console.log("🧭 REGISTERING AGENT ROUTES NOW");
 app.use("/api/agents", agentRoutes);
 
 // -----------------------------

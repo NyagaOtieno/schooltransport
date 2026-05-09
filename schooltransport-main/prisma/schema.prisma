@@ -7,246 +7,186 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── PLATFORM / TENANT ───────────────────────────────────────────────────────
-
 model Tenant {
-  id        Int      @id @default(autoincrement())
-  name      String
-  logoUrl   String?
-  address   String?
-  phone     String?
-  mode      AppMode  @default(KID)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  buses       Bus[]
-  students    Student[]
-  users       User[]
-  assets      Asset[]
-  parents     Parent[]
-  clients     Client[]
-  panicEvents PanicEvent[]
-
-  // Agent relationship — tracks which agent onboarded this school
+  id           Int           @id @default(autoincrement())
+  name         String
+  logoUrl      String?
+  address      String?
+  phone        String?
+  mode         AppMode       @default(KID)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
   agentTenants AgentTenant[]
+  assets       Asset[]
+  buses        Bus[]
+  clients      Client[]
+  panicEvents  PanicEvent[]
+  parents      Parent[]
+  students     Student[]
+  users        User[]
 
   @@index([mode])
 }
 
-// ─── USER ────────────────────────────────────────────────────────────────────
-
 model User {
-  id       Int     @id @default(autoincrement())
-  name     String
-  email    String
-  phone    String?
-  role     Role
-  password String
+  id                 Int          @id @default(autoincrement())
+  name               String
+  email              String
+  password           String
+  createdAt          DateTime     @default(now())
+  phone              String?
+  updatedAt          DateTime     @updatedAt
+  role               Role
+  resetOtp           String?
+  resetOtpExpiresAt  DateTime?
+  resetOtpSentAt     DateTime?
+  tenantId           Int?
+  agent              Agent?       @relation("UserToAgent")
+  confirmedAssets    Asset[]      @relation("AssetConfirmedBy")
+  deliveredAssets    Asset[]      @relation("AssetDeliveredBy")
+  assistantBuses     Bus[]        @relation("AssistantBus")
+  driverBuses        Bus[]        @relation("DriverBus")
+  client             Client?      @relation("UserToClient")
+  assistantManifests Manifest[]   @relation("AssistantManifest")
+  panicEvents        PanicEvent[] @relation("UserToPanicEvents")
+  parent             Parent?      @relation("UserToParent")
+  student            Student?     @relation("UserStudent")
+  tenant             Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  // Nullable: AGENT users are platform-level and have tenantId = null
-  // SYSTEM_ADMIN users also have tenantId = null
-  tenantId Int?
-  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  parent Parent? @relation("UserToParent")
-  client Client? @relation("UserToClient")
-  agent  Agent?  @relation("UserToAgent")
-
-  resetOtp          String?
-  resetOtpExpiresAt DateTime?
-  resetOtpSentAt    DateTime?
-
-  driverBuses        Bus[]      @relation("DriverBus")
-  assistantBuses     Bus[]      @relation("AssistantBus")
-  assistantManifests Manifest[] @relation("AssistantManifest")
-
-  student     Student?     @relation("UserStudent")
-  panicEvents PanicEvent[] @relation("UserToPanicEvents")
-
-  deliveredAssets Asset[] @relation("AssetDeliveredBy")
-  confirmedAssets Asset[] @relation("AssetConfirmedBy")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Tenant-scoped uniqueness for tenant users
-  // NULLs are not considered equal in PostgreSQL unique constraints so
-  // platform-level users (tenantId = null) naturally bypass this.
   @@unique([email, tenantId])
   @@unique([phone, tenantId])
   @@index([tenantId])
   @@index([role])
 }
 
-// ─── PARENT ──────────────────────────────────────────────────────────────────
-
 model Parent {
-  id       Int  @id @default(autoincrement())
-  tenantId Int
-  userId   Int? @unique
-
-  user   User?  @relation("UserToParent", fields: [userId], references: [id], onDelete: SetNull)
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  students      Student[]
+  id            Int            @id @default(autoincrement())
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  userId        Int?           @unique
+  tenantId      Int
   notifications Notification[]
-
-  wallet        Wallet?
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user          User?          @relation("UserToParent", fields: [userId], references: [id])
+  students      Student[]
   subscriptions Subscription[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  transactions Transaction[] @relation("ParentTransactions")
+  transactions  Transaction[]  @relation("ParentTransactions")
+  wallet        Wallet?
 
   @@index([tenantId])
 }
-
-// ─── CLIENT ──────────────────────────────────────────────────────────────────
 
 model Client {
-  id       Int  @id @default(autoincrement())
-  tenantId Int
-  userId   Int? @unique
-
-  user   User?  @relation("UserToClient", fields: [userId], references: [id], onDelete: SetNull)
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
+  id            Int            @id @default(autoincrement())
+  tenantId      Int
+  userId        Int?           @unique
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
   assets        Asset[]
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user          User?          @relation("UserToClient", fields: [userId], references: [id])
   notifications Notification[]
-
-  wallet        Wallet?
   subscriptions Subscription[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  transactions Transaction[] @relation("ClientTransactions")
+  transactions  Transaction[]  @relation("ClientTransactions")
+  wallet        Wallet?
 
   @@index([tenantId])
 }
 
-// ─── AGENT (platform-level sales agent) ──────────────────────────────────────
-
 model Agent {
-  id     Int   @id @default(autoincrement())
-  userId Int   @unique
-  user   User  @relation("UserToAgent", fields: [userId], references: [id], onDelete: Cascade)
-
-  commissionRate Float   @default(0.10)  // 10% of subscription revenue
-  isActive       Boolean @default(true)
-
-  wallet  AgentWallet?
-  tenants AgentTenant[]  // schools this agent manages
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             Int           @id @default(autoincrement())
+  userId         Int           @unique
+  commissionRate Float         @default(0.10)
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  user           User          @relation("UserToAgent", fields: [userId], references: [id], onDelete: Cascade)
+  tenants        AgentTenant[]
+  wallet         AgentWallet?
 }
 
-// Agent ↔ Tenant many-to-many (one agent can manage many schools)
 model AgentTenant {
-  id       Int @id @default(autoincrement())
-  agentId  Int
-  tenantId Int
-
-  agent  Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
+  id          Int      @id @default(autoincrement())
+  agentId     Int
+  tenantId    Int
   onboardedAt DateTime @default(now())
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([agentId, tenantId])
   @@index([agentId])
   @@index([tenantId])
 }
 
-// Agent-specific wallet (separate from Parent/Client wallets)
 model AgentWallet {
-  id      Int   @id @default(autoincrement())
-  agentId Int   @unique
-  agent   Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  balance Float @default(0)
-
+  id           Int                @id @default(autoincrement())
+  agentId      Int                @unique
+  balance      Float              @default(0)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
   transactions AgentTransaction[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  agent        Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
 }
 
-// Agent transaction ledger
 model AgentTransaction {
-  id       Int         @id @default(autoincrement())
-  walletId Int
-  wallet   AgentWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
-
+  id            Int         @id @default(autoincrement())
+  walletId      Int
   type          AgentTxType
   amount        Float
-  reference     String?  @unique
+  reference     String?     @unique
   description   String?
   balanceBefore Float
   balanceAfter  Float
-
-  createdAt DateTime @default(now())
+  createdAt     DateTime    @default(now())
+  wallet        AgentWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
   @@index([walletId])
   @@index([type])
   @@index([createdAt])
 }
 
-// ─── BUS ─────────────────────────────────────────────────────────────────────
-
 model Bus {
-  id          Int      @id @default(autoincrement())
-  name        String
-  plateNumber String
-  capacity    Int
-  route       String
-  driverId    Int?
-  assistantId Int?
-  createdAt   DateTime @default(now())
-
-  tenantId  Int
-  updatedAt DateTime @updatedAt
-
-  assistant User? @relation("AssistantBus", fields: [assistantId], references: [id], onDelete: SetNull)
-  driver    User? @relation("DriverBus", fields: [driverId], references: [id], onDelete: SetNull)
-
+  id            Int            @id @default(autoincrement())
+  name          String
+  plateNumber   String
+  capacity      Int
+  route         String
+  driverId      Int?
+  assistantId   Int?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  tenantId      Int
+  assets        Asset[]
+  assistant     User?          @relation("AssistantBus", fields: [assistantId], references: [id])
+  driver        User?          @relation("DriverBus", fields: [driverId], references: [id])
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   locations     BusLocation[]
   liveLocations LiveLocation[]
   manifests     Manifest[]
   students      Student[]
-  assets        Asset[]
 
   @@unique([tenantId, plateNumber])
   @@index([tenantId])
 }
 
-// ─── STUDENT ─────────────────────────────────────────────────────────────────
-
 model Student {
-  id        Int    @id @default(autoincrement())
-  name      String
-  grade     String
-  latitude  Float
-  longitude Float
-
-  busId    Int
-  parentId Int?
-  tenantId Int
-  userId   Int? @unique
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  bus    Bus    @relation(fields: [busId], references: [id], onDelete: Cascade)
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  parent Parent? @relation(fields: [parentId], references: [id], onDelete: SetNull)
-  user   User?   @relation("UserStudent", fields: [userId], references: [id], onDelete: SetNull)
-
+  id            Int            @id @default(autoincrement())
+  name          String
+  grade         String
+  latitude      Float
+  longitude     Float
+  busId         Int
+  parentId      Int?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  userId        Int?           @unique
+  tenantId      Int
   manifests     Manifest[]
   panicEvents   PanicEvent[]
+  bus           Bus            @relation(fields: [busId], references: [id], onDelete: Cascade)
+  parent        Parent?        @relation(fields: [parentId], references: [id])
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user          User?          @relation("UserStudent", fields: [userId], references: [id])
   subscriptions Subscription[]
 
   @@index([tenantId])
@@ -254,69 +194,54 @@ model Student {
   @@index([parentId])
 }
 
-// ─── ASSET ───────────────────────────────────────────────────────────────────
-
 model Asset {
-  id   Int     @id @default(autoincrement())
-  name String
-  type String?
-  tag  String?
-
-  busId    Int?
-  clientId Int?
-  tenantId Int
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  deliveryStatus AssetDeliveryStatus @default(IN_TRANSIT)
-  deliveredAt    DateTime?
-  confirmedAt    DateTime?
-
+  id                Int                 @id @default(autoincrement())
+  name              String
+  type              String?
+  tag               String?
+  busId             Int?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  confirmedAt       DateTime?
+  deliveredAt       DateTime?
   deliveredByUserId Int?
-  deliveredByUser   User? @relation("AssetDeliveredBy", fields: [deliveredByUserId], references: [id], onDelete: SetNull)
-
-  confirmedById Int?
-  confirmedBy   User? @relation("AssetConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
-
-  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  client Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  bus    Bus?    @relation(fields: [busId], references: [id], onDelete: SetNull)
-
-  manifests     Manifest[]
-  panicEvents   PanicEvent[]
-  subscriptions Subscription[]
+  confirmedById     Int?
+  deliveryStatus    AssetDeliveryStatus @default(IN_TRANSIT)
+  clientId          Int?
+  tenantId          Int
+  bus               Bus?                @relation(fields: [busId], references: [id])
+  client            Client?             @relation(fields: [clientId], references: [id])
+  confirmedBy       User?               @relation("AssetConfirmedBy", fields: [confirmedById], references: [id])
+  deliveredByUser   User?               @relation("AssetDeliveredBy", fields: [deliveredByUserId], references: [id])
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  manifests         Manifest[]
+  panicEvents       PanicEvent[]
+  subscriptions     Subscription[]
 
   @@index([tenantId])
   @@index([busId])
   @@index([clientId])
 }
 
-// ─── MANIFEST ────────────────────────────────────────────────────────────────
-
 model Manifest {
-  id          Int  @id @default(autoincrement())
-  studentId   Int?
-  assetId     Int?
-  busId       Int
-  assistantId Int?
-
-  date          DateTime  @default(now())
+  id            Int             @id @default(autoincrement())
+  studentId     Int?
+  busId         Int
+  assistantId   Int?
+  date          DateTime        @default(now())
   latitude      Float?
   longitude     Float?
-  boardingTime  DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  status        ManifestStatus
+  session       ManifestSession @default(MORNING)
   alightingTime DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  status  ManifestStatus
-  session ManifestSession @default(MORNING)
-
-  assistant User?    @relation("AssistantManifest", fields: [assistantId], references: [id], onDelete: SetNull)
-  bus       Bus      @relation(fields: [busId], references: [id], onDelete: Cascade)
-  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
-  asset     Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  boardingTime  DateTime?
+  assetId       Int?
+  asset         Asset?          @relation(fields: [assetId], references: [id])
+  assistant     User?           @relation("AssistantManifest", fields: [assistantId], references: [id])
+  bus           Bus             @relation(fields: [busId], references: [id], onDelete: Cascade)
+  student       Student?        @relation(fields: [studentId], references: [id])
 
   @@index([studentId])
   @@index([assetId])
@@ -324,96 +249,78 @@ model Manifest {
   @@index([studentId, createdAt])
 }
 
-// ─── NOTIFICATION ─────────────────────────────────────────────────────────────
-
 model Notification {
-  id       Int  @id @default(autoincrement())
+  id       Int      @id @default(autoincrement())
   parentId Int?
+  title    String
+  message  String
+  type     String
+  sentAt   DateTime @default(now())
+  read     Boolean  @default(false)
   clientId Int?
-
-  title   String
-  message String
-  type    String
-
-  sentAt DateTime @default(now())
-  read   Boolean  @default(false)
-
-  parent Parent? @relation(fields: [parentId], references: [id], onDelete: Cascade)
-  client Client? @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client   Client?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  parent   Parent?  @relation(fields: [parentId], references: [id], onDelete: Cascade)
 
   @@index([parentId])
   @@index([clientId])
 }
 
-// ─── LOCATION MODELS ──────────────────────────────────────────────────────────
-
 model BusLocation {
-  id       Int @id @default(autoincrement())
-  busId    Int
-  deviceId Int
-
-  lat       Float
-  lng       Float
-  direction Int?
-  speed     Float?
-  state     String?
-  movement  String?
-
+  id         Int      @id @default(autoincrement())
+  busId      Int
+  deviceId   Int
+  lat        Float
+  lng        Float
+  direction  Int?
+  speed      Float?
+  state      String?
+  movement   String?
   lastUpdate DateTime
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
-
-  bus Bus @relation(fields: [busId], references: [id], onDelete: Cascade)
+  bus        Bus      @relation(fields: [busId], references: [id], onDelete: Cascade)
 
   @@index([busId, lastUpdate])
 }
 
 model LiveLocation {
-  id         Int    @id @default(autoincrement())
-  vehicleReg String @unique
-  busId      Int?
-
+  id            Int      @id @default(autoincrement())
+  vehicleReg    String   @unique
+  busId         Int?
   lat           Float
   lng           Float
   direction     Float
   speed         Float?
   movementState String?
-
-  lastUpdate DateTime
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  bus Bus? @relation(fields: [busId], references: [id], onDelete: SetNull)
+  lastUpdate    DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  bus           Bus?     @relation(fields: [busId], references: [id])
 
   @@index([busId])
   @@index([lastUpdate])
   @@index([vehicleReg])
 }
 
-// ─── PANIC ───────────────────────────────────────────────────────────────────
-
 model PanicEvent {
-  id       Int  @id @default(autoincrement())
-  userId   Int
-  childId  Int?
-  assetId  Int?
-  tenantId Int
-
-  latitude    Float
-  longitude   Float
+  id          Int         @id @default(autoincrement())
+  userId      Int
   phoneNumber String?
   role        Role
   ipAddress   String?
   userAgent   String?
   status      PanicStatus
   createdAt   DateTime    @default(now())
+  childId     Int?
   createdBy   String
-
-  user   User     @relation("UserToPanicEvents", fields: [userId], references: [id], onDelete: Cascade)
-  child  Student? @relation(fields: [childId], references: [id], onDelete: SetNull)
-  asset  Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
-  tenant Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  latitude    Float
+  longitude   Float
+  assetId     Int?
+  tenantId    Int
+  asset       Asset?      @relation(fields: [assetId], references: [id])
+  child       Student?    @relation(fields: [childId], references: [id])
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User        @relation("UserToPanicEvents", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([childId])
@@ -421,46 +328,37 @@ model PanicEvent {
   @@index([tenantId])
 }
 
-// ─── MONETIZATION ────────────────────────────────────────────────────────────
-
 model Wallet {
-  id       Int  @id @default(autoincrement())
-  parentId Int? @unique
-  clientId Int? @unique
-
-  balance Float @default(0)
-
-  parent Parent? @relation(fields: [parentId], references: [id], onDelete: Cascade)
-  client Client? @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  transactions Transaction[] @relation("WalletTransactions")
+  id           Int           @id @default(autoincrement())
+  parentId     Int?          @unique
+  clientId     Int?          @unique
+  balance      Float         @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
   ledger       Ledger[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  transactions Transaction[] @relation("WalletTransactions")
+  client       Client?       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  parent       Parent?       @relation(fields: [parentId], references: [id], onDelete: Cascade)
 
   @@index([parentId])
   @@index([clientId])
 }
 
 model Subscription {
-  id        Int  @id @default(autoincrement())
-  parentId  Int?
-  clientId  Int?
-  studentId Int?
-  assetId   Int?
-
+  id         Int                @id @default(autoincrement())
+  parentId   Int?
+  clientId   Int?
+  studentId  Int?
+  assetId    Int?
   type       SubscriptionType   @default(DAILY)
   status     SubscriptionStatus @default(ACTIVE)
   expiryDate DateTime
-
-  parent  Parent?  @relation(fields: [parentId], references: [id], onDelete: Cascade)
-  client  Client?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  student Student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  asset   Asset?   @relation(fields: [assetId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  asset      Asset?             @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  client     Client?            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  parent     Parent?            @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  student    Student?           @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@unique([parentId, studentId])
   @@unique([clientId, assetId])
@@ -468,25 +366,19 @@ model Subscription {
 }
 
 model Transaction {
-  id       Int @id @default(autoincrement())
-
-  parentId Int?
-  clientId Int?
-  walletId Int
-
+  id        Int               @id @default(autoincrement())
+  parentId  Int?
+  clientId  Int?
+  walletId  Int
   amount    Float
   type      TransactionType
   status    TransactionStatus @default(SUCCESS)
   reference String?           @unique
-
-  wallet Wallet @relation("WalletTransactions", fields: [walletId], references: [id], onDelete: Cascade)
-
-  parent Parent? @relation("ParentTransactions", fields: [parentId], references: [id], onDelete: Cascade)
-  client Client? @relation("ClientTransactions", fields: [clientId], references: [id], onDelete: Cascade)
-
-  ledger Ledger[]
-
-  createdAt DateTime @default(now())
+  createdAt DateTime          @default(now())
+  ledger    Ledger[]
+  client    Client?           @relation("ClientTransactions", fields: [clientId], references: [id], onDelete: Cascade)
+  parent    Parent?           @relation("ParentTransactions", fields: [parentId], references: [id], onDelete: Cascade)
+  wallet    Wallet            @relation("WalletTransactions", fields: [walletId], references: [id], onDelete: Cascade)
 
   @@index([walletId])
   @@index([parentId])
@@ -496,30 +388,22 @@ model Transaction {
 }
 
 model Ledger {
-  id     Int    @id @default(autoincrement())
-
-  walletId Int
-  wallet   Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
-
-  type   LedgerType
-  amount Float
-
+  id            Int          @id @default(autoincrement())
+  walletId      Int
+  type          LedgerType
+  amount        Float
   balanceBefore Float
   balanceAfter  Float
-
-  reference   String?  @unique
-  description String?
-
+  reference     String?      @unique
+  description   String?
   transactionId Int?
-  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
-
-  createdAt DateTime @default(now())
+  createdAt     DateTime     @default(now())
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+  wallet        Wallet       @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
   @@index([walletId])
   @@index([transactionId])
 }
-
-// ─── ENUMS ───────────────────────────────────────────────────────────────────
 
 enum Role {
   ADMIN
@@ -528,8 +412,8 @@ enum Role {
   PARENT
   CLIENT
   MERCHANT
-  AGENT          // Platform-level sales agent (tenantId = null)
-  SYSTEM_ADMIN   // Platform super-admin (tenantId = null)
+  AGENT
+  SYSTEM_ADMIN
 }
 
 enum AgentTxType {
@@ -550,10 +434,10 @@ enum ManifestSession {
 }
 
 enum PanicStatus {
-  ACTIVE
   PENDING
   ACKNOWLEDGED
   RESOLVED
+  ACTIVE
   CONFIRMED
 }
 
