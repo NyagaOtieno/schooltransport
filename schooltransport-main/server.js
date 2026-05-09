@@ -9,6 +9,8 @@ import "./cron.js";
 import app from "./src/app.js";
 import prisma from "./src/middleware/prisma.js";
 
+console.log("🔥 SERVER ENTRY FILE LOADED");
+
 const PORT = process.env.PORT || 5000;
 
 
