@@ -1,21 +1,22 @@
 // -----------------------------
-// Load environment
+// Load environment first
 // -----------------------------
-import express from "express";
 import dotenv from "dotenv";
-import cors from "cors";
-
-console.log("🔥 APP.JS LOADED");
-
 dotenv.config();
 
 // -----------------------------
-// Core imports
+// Core dependencies
+// -----------------------------
+import express from "express";
+import cors from "cors";
+
+// -----------------------------
+// Prisma
 // -----------------------------
 import prisma from "./middleware/prisma.js";
 
 // -----------------------------
-// Routes
+// Route imports
 // -----------------------------
 import smsRoutes from "./routes/sms.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
@@ -30,32 +31,36 @@ import userRoutes from "./routes/userRoutes.js";
 import schoolRoutes from "./routes/schoolRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
 import parentRoutes from "./routes/parentRoutes.js";
-import { startBillingCron } from "./jobs/billing.cron.js";
-import analyticsRoutes from "./routes/analytics.routes.js";
+
+// NEW
 import trackingRoutes from "./routes/trackingRoutes.js";
 import walletRoutes from "./routes/wallet.routes.js";
-import agentRoutes from "./routes/agent.routes.js";
 
-console.log("🔥 APP.JS LOADED (NEW VERSION)");
-
-startBillingCron();
+// -----------------------------
+// App init
+// -----------------------------
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// -----------------------------
+// Middleware
+// -----------------------------
 app.use(express.json());
 
 // -----------------------------
-// Logger FIRST (fix)
+// Request logger
+// MUST come BEFORE routes
 // -----------------------------
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
   next();
 });
 
 // -----------------------------
 // CORS
 // -----------------------------
-const allowlist = (process.env.CORS_ORIGINS ||
+const allowlist = (
+  process.env.CORS_ORIGINS ||
   "https://trackmykid-webapp.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
 )
   .split(",")
@@ -66,17 +71,44 @@ app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (allowlist.includes(origin)) return cb(null, true);
-      return cb(new Error("Not allowed by CORS: " + origin));
+
+      if (allowlist.includes(origin)) {
+        return cb(null, true);
+      }
+
+      return cb(new Error(`Not allowed by CORS: ${origin}`));
     },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
 app.options("*", cors());
 
 // -----------------------------
-// API Routes
+// Health route
+// -----------------------------
+app.get("/health", async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+
+    return res.status(200).json({
+      success: true,
+      message: "API is running 🚀",
+      database: "connected",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Database connection failed",
+    });
+  }
+});
+
+// -----------------------------
+// API routes
 // -----------------------------
 app.use("/api/sms", smsRoutes);
 app.use("/api/notifications", notificationRoutes);
@@ -91,24 +123,33 @@ app.use("/api/users", userRoutes);
 app.use("/api/schools", schoolRoutes);
 app.use("/api/tenants", tenantRoutes);
 app.use("/api/parents", parentRoutes);
-app.use("/api/analytics", analyticsRoutes);
+
+// NEW
 app.use("/api/tracking", trackingRoutes);
 app.use("/api/wallet", walletRoutes);
-console.log("🧭 REGISTERING AGENT ROUTES NOW");
-app.use("/api/agents", agentRoutes);
-
-// -----------------------------
-// Health check
-// -----------------------------
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", message: "API running 🚀" });
-});
 
 // -----------------------------
 // 404 handler
 // -----------------------------
 app.use((req, res) => {
-  res.status(404).json({ error: "Route not found" });
+  console.warn(`404 → ${req.method} ${req.originalUrl}`);
+
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
+  });
+});
+
+// -----------------------------
+// Global error handler
+// -----------------------------
+app.use((err, req, res, next) => {
+  console.error("[GLOBAL ERROR]", err);
+
+  res.status(500).json({
+    success: false,
+    message: "Internal server error",
+  });
 });
 
 export default app;
