@@ -31,8 +31,7 @@ import userRoutes from "./routes/userRoutes.js";
 import schoolRoutes from "./routes/schoolRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
 import parentRoutes from "./routes/parentRoutes.js";
-
-// NEW
+import bootstrapRoutes from "./routes/bootstrap.routes.js";
 import trackingRoutes from "./routes/trackingRoutes.js";
 import walletRoutes from "./routes/wallet.routes.js";
 
@@ -123,8 +122,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/schools", schoolRoutes);
 app.use("/api/tenants", tenantRoutes);
 app.use("/api/parents", parentRoutes);
-
-// NEW
+app.use("/api/auth/bootstrap", bootstrapRoutes);
 app.use("/api/tracking", trackingRoutes);
 app.use("/api/wallet", walletRoutes);
 
