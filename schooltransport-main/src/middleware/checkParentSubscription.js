@@ -13,21 +13,16 @@ const checkParentSubscription = (paramName = "studentId") => {
       const studentId = req.params[paramName];
 
       if (!user?.id) {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized",
-        });
+        return res.status(401).json({ success: false, message: "Unauthorized" });
       }
 
       if (!studentId) {
-        return res.status(400).json({
-          success: false,
-          message: "Student ID required",
-        });
+        return res.status(400).json({ success: false, message: "Student ID required" });
       }
 
       const active = await getActiveSubscription({
-        userId: user.id,
+        parentId: user.parentId ?? null,
+        clientId: user.clientId ?? null,
         studentId,
       });
 
@@ -39,11 +34,12 @@ const checkParentSubscription = (paramName = "studentId") => {
       let updatedWallet;
 
       try {
-        updatedWallet = await deductWallet(
-          user.id,
-          DAILY_FEE,
-          `Daily tracking subscription for student ${studentId}`
-        );
+        updatedWallet = await deductWallet({
+          parentId: user.parentId ?? null,
+          clientId: user.clientId ?? null,
+          amount: DAILY_FEE,
+          reference: `student-${studentId}-${Date.now()}`,
+        });
       } catch (walletErr) {
         if (
           walletErr.code === "INSUFFICIENT_BALANCE" ||
@@ -59,7 +55,6 @@ const checkParentSubscription = (paramName = "studentId") => {
           });
         }
 
-        console.error(walletErr);
         return res.status(500).json({
           success: false,
           message: "Billing error occurred",
@@ -67,16 +62,16 @@ const checkParentSubscription = (paramName = "studentId") => {
       }
 
       const subscription = await activateSubscription({
-        userId: user.id,
+        parentId: user.parentId ?? null,
+        clientId: user.clientId ?? null,
         studentId,
       });
 
       req.subscription = subscription;
       req.walletBalance = updatedWallet.balance;
 
-      return next();
+      next();
     } catch (err) {
-      console.error(err);
       return res.status(500).json({
         success: false,
         message: "Unexpected error",

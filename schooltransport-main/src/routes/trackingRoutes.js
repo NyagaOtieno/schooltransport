@@ -4,7 +4,7 @@ import * as trackingService from "../services/trackingSync.js";
 import prisma from "../middleware/prisma.js";
 import { authMiddleware } from "../middleware/auth.js";
 import checkParentSubscription from "../middleware/checkParentSubscription.js";
-import { deductWallet, getBalance } from "../services/wallet.service.js";
+
 
 const router = express.Router();
 
