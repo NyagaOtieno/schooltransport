@@ -9,11 +9,11 @@
     "start": "node ./server.js",
     "build": "echo 'No build step needed for Express backend'",
     "postinstall": "prisma generate",
-       "prisma:generate": "prisma generate",
+    "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
     "prisma:seed": "node prisma/seed.js",
     "seed": "node prisma/seed.js"
-   },
+  },
   "prisma": {
     "seed": "node prisma/seed.js"
   },
@@ -30,7 +30,8 @@
     "node-cron": "^4.2.1",
     "nodemailer": "^7.0.12",
     "sib-api-v3-sdk": "^8.5.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^25.0.7",
