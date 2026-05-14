@@ -1,14 +1,35 @@
-// src/routes/wallet.routes.js
+// src/routes/Wallet.routes.js
 import express from "express";
 import { authMiddleware } from "../middleware/auth.js";
-import { topUp, balance, transactions } from "../controllers/wallet.controller.js";
+import {
+  topUp,
+  balance,
+  transactions,       // ✅ now exported from controller (see Wallet.controller.js)
+} from "../controllers/Wallet.controller.js";  // ✅ fixed casing: was wallet.controller.js
 
 const router = express.Router();
 
+// All wallet endpoints require a valid JWT
 router.use(authMiddleware);
 
-router.post("/topup",        topUp);         // POST /api/wallet/topup
-router.get("/balance",       balance);        // GET  /api/wallet/balance
-router.get("/transactions",  transactions);   // GET  /api/wallet/transactions
+/**
+ * POST /api/wallet/topup
+ * Body: { amount: number }
+ * Role: PARENT or CLIENT
+ */
+router.post("/topup", topUp);
+
+/**
+ * GET /api/wallet/balance
+ * Role: PARENT or CLIENT
+ */
+router.get("/balance", balance);
+
+/**
+ * GET /api/wallet/transactions
+ * Role: PARENT or CLIENT
+ * Query: ?page=1&limit=20
+ */
+router.get("/transactions", transactions);
 
 export default router;

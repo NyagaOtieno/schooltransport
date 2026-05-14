@@ -18,37 +18,36 @@ import prisma from "./middleware/prisma.js";
 // -----------------------------
 // Route imports
 // -----------------------------
-import smsRoutes from "./routes/sms.routes.js";
+import smsRoutes          from "./routes/sms.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
-import manifestRoutes from "./routes/manifestRoutes.js";
-import authRoutes from "./routes/authRoutes.js";
-import panicRoutes from "./routes/panicRoutes.js";
-import studentRoutes from "./routes/studentRoutes.js";
-import assetRoutes from "./routes/assetRoutes.js";
-import publicRoutes from "./routes/publicRoutes.js";
-import busRoutes from "./routes/busRoutes.js";
-import userRoutes from "./routes/userRoutes.js";
-import schoolRoutes from "./routes/schoolRoutes.js";
-import tenantRoutes from "./routes/tenantRoutes.js";
-import parentRoutes from "./routes/parentRoutes.js";
-import bootstrapRoutes from "./routes/bootstrap.routes.js";
-import trackingRoutes from "./routes/trackingRoutes.js";
-import walletRoutes from "./routes/wallet.routes.js";
+import manifestRoutes     from "./routes/manifestRoutes.js";
+import authRoutes         from "./routes/authRoutes.js";
+import panicRoutes        from "./routes/panicRoutes.js";
+import studentRoutes      from "./routes/studentRoutes.js";
+import assetRoutes        from "./routes/assetRoutes.js";
+import publicRoutes       from "./routes/publicRoutes.js";
+import busRoutes          from "./routes/busRoutes.js";
+import userRoutes         from "./routes/userRoutes.js";
+import schoolRoutes       from "./routes/schoolRoutes.js";
+import tenantRoutes       from "./routes/tenantRoutes.js";
+import parentRoutes       from "./routes/parentRoutes.js";
+import bootstrapRoutes    from "./routes/bootstrap.routes.js";
+import trackingRoutes     from "./routes/trackingRoutes.js";
+import walletRoutes       from "./routes/Wallet.routes.js";  // ✅ fixed: matches actual filename casing
+import agentRoutes        from "./routes/agent.routes.js";   // ✅ added: was missing entirely
 
 // -----------------------------
 // App init
 // -----------------------------
 const app = express();
-const PORT = process.env.PORT || 5000;
 
 // -----------------------------
-// Middleware
+// Body parsing
 // -----------------------------
 app.use(express.json());
 
 // -----------------------------
-// Request logger
-// MUST come BEFORE routes
+// Request logger — MUST be BEFORE routes
 // -----------------------------
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
@@ -70,11 +69,7 @@ app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-
-      if (allowlist.includes(origin)) {
-        return cb(null, true);
-      }
-
+      if (allowlist.includes(origin)) return cb(null, true);
       return cb(new Error(`Not allowed by CORS: ${origin}`));
     },
     credentials: true,
@@ -86,12 +81,11 @@ app.use(
 app.options("*", cors());
 
 // -----------------------------
-// Health route
+// Health check
 // -----------------------------
 app.get("/health", async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-
     return res.status(200).json({
       success: true,
       message: "API is running 🚀",
@@ -109,33 +103,30 @@ app.get("/health", async (req, res) => {
 // -----------------------------
 // API routes
 // -----------------------------
-app.use("/api/sms", smsRoutes);
-app.use("/api/notifications", notificationRoutes);
-app.use("/api/manifests", manifestRoutes);
-app.use("/api/auth", authRoutes);
-app.use("/api/panic", panicRoutes);
-app.use("/api/students", studentRoutes);
-app.use("/api/assets", assetRoutes);
-app.use("/api/public", publicRoutes);
-app.use("/api/buses", busRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/schools", schoolRoutes);
-app.use("/api/tenants", tenantRoutes);
-app.use("/api/parents", parentRoutes);
+app.use("/api/sms",            smsRoutes);
+app.use("/api/notifications",  notificationRoutes);
+app.use("/api/manifests",      manifestRoutes);
+app.use("/api/auth",           authRoutes);
+app.use("/api/panic",          panicRoutes);
+app.use("/api/students",       studentRoutes);
+app.use("/api/assets",         assetRoutes);
+app.use("/api/public",         publicRoutes);
+app.use("/api/buses",          busRoutes);
+app.use("/api/users",          userRoutes);
+app.use("/api/schools",        schoolRoutes);
+app.use("/api/tenants",        tenantRoutes);
+app.use("/api/parents",        parentRoutes);
 app.use("/api/auth/bootstrap", bootstrapRoutes);
-app.use("/api/tracking", trackingRoutes);
-app.use("/api/wallet", walletRoutes);
+app.use("/api/tracking",       trackingRoutes);
+app.use("/api/wallet",         walletRoutes);
+app.use("/api/agents",         agentRoutes);  // ✅ added
 
 // -----------------------------
 // 404 handler
 // -----------------------------
 app.use((req, res) => {
   console.warn(`404 → ${req.method} ${req.originalUrl}`);
-
-  res.status(404).json({
-    success: false,
-    message: "Route not found",
-  });
+  res.status(404).json({ success: false, message: "Route not found" });
 });
 
 // -----------------------------
@@ -143,11 +134,7 @@ app.use((req, res) => {
 // -----------------------------
 app.use((err, req, res, next) => {
   console.error("[GLOBAL ERROR]", err);
-
-  res.status(500).json({
-    success: false,
-    message: "Internal server error",
-  });
+  res.status(500).json({ success: false, message: "Internal server error" });
 });
 
 export default app;
