@@ -33,7 +33,7 @@ import tenantRoutes       from "./routes/tenantRoutes.js";
 import parentRoutes       from "./routes/parentRoutes.js";
 import bootstrapRoutes    from "./routes/bootstrap.routes.js";
 import trackingRoutes     from "./routes/trackingRoutes.js";
-import walletRoutes       from "./routes/Wallet.routes.js";  // ✅ fixed: matches actual filename casing
+import walletRoutes       from "./routes/wallet.routes.js";  // ✅ fixed: matches actual filename casing
 import agentRoutes        from "./routes/agent.routes.js";   // ✅ added: was missing entirely
 
 // -----------------------------
