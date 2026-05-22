@@ -5,7 +5,7 @@ import {
   topUp,
   balance,
   transactions,       // ✅ now exported from controller (see Wallet.controller.js)
-} from "../controllers/Wallet.controller.js";  // ✅ fixed casing: was wallet.controller.js
+} from "../controllers/wallet.controller.js";  // ✅ fixed casing: was wallet.controller.js
 
 const router = express.Router();
 
