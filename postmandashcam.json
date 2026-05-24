@@ -1,0 +1,201 @@
+{
+  "info": {
+    "name": "Tramigo API v2",
+    "_postman_id": "b4c9c6f7-1234-5678-9012",
+    "description": "Tramigo API with automatic MD5 signature generation",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://dashcam.tramigovideo.com/route/rest"
+    },
+    {
+      "key": "app_key",
+      "value": "YOUR_APP_KEY"
+    },
+    {
+      "key": "app_secret",
+      "value": "YOUR_APP_SECRET"
+    },
+    {
+      "key": "user_id",
+      "value": "YOUR_ACCOUNT"
+    },
+    {
+      "key": "user_pwd_md5",
+      "value": "MD5_PASSWORD"
+    },
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "refresh_token",
+      "value": ""
+    },
+    {
+      "key": "imei",
+      "value": "868120145233604"
+    }
+  ],
+
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const appSecret = pm.collectionVariables.get('app_secret');",
+          "",
+          "let params = {};",
+          "",
+          "pm.request.body.urlencoded.each(item => {",
+          "    if(item.key !== 'sign'){",
+          "        let value=item.value;",
+          "",
+          "        value=value.replace(/{{(.*?)}}/g,(m,p)=>{",
+          "            return pm.variables.get(p)||'';",
+          "        });",
+          "",
+          "        params[item.key]=value;",
+          "    }",
+          "});",
+          "",
+          "let str=appSecret;",
+          "",
+          "Object.keys(params)",
+          " .sort()",
+          " .forEach(k=>{",
+          "    str += k + params[k];",
+          "});",
+          "",
+          "str += appSecret;",
+          "",
+          "const signature = CryptoJS.MD5(str)",
+          " .toString()",
+          " .toUpperCase();",
+          "",
+          "pm.variables.set('GENERATED_SIGNATURE',signature);",
+          "",
+          "console.log('Generated Sign:',signature);"
+        ]
+      }
+    }
+  ],
+
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Get Access Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{baseUrl}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {"key":"method","value":"TMG.oauth.token.get"},
+                {"key":"timestamp","value":"{{$timestamp}}"},
+                {"key":"app_key","value":"{{app_key}}"},
+                {"key":"sign_method","value":"md5"},
+                {"key":"v","value":"1.0"},
+                {"key":"format","value":"json"},
+                {"key":"user_id","value":"{{user_id}}"},
+                {"key":"user_pwd_md5","value":"{{user_pwd_md5}}"},
+                {"key":"expires_in","value":"7200"},
+                {"key":"sign","value":"{{GENERATED_SIGNATURE}}"}
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "let json=pm.response.json();",
+                  "",
+                  "if(json.result){",
+                  " pm.collectionVariables.set('access_token',json.result.accessToken);",
+                  " pm.collectionVariables.set('refresh_token',json.result.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+
+    {
+      "name":"Device",
+
+      "item":[
+        {
+          "name":"Get Device Detail",
+          "request":{
+            "method":"POST",
+            "url":"{{baseUrl}}",
+            "header":[
+              {
+                "key":"Content-Type",
+                "value":"application/x-www-form-urlencoded"
+              }
+            ],
+            "body":{
+              "mode":"urlencoded",
+              "urlencoded":[
+                {"key":"method","value":"TMG.track.device.detail"},
+                {"key":"timestamp","value":"{{$timestamp}}"},
+                {"key":"app_key","value":"{{app_key}}"},
+                {"key":"sign_method","value":"md5"},
+                {"key":"v","value":"1.0"},
+                {"key":"format","value":"json"},
+                {"key":"access_token","value":"{{access_token}}"},
+                {"key":"imei","value":"{{imei}}"},
+                {"key":"sign","value":"{{GENERATED_SIGNATURE}}"}
+              ]
+            }
+          }
+        },
+
+        {
+          "name":"Get Device Location",
+          "request":{
+            "method":"POST",
+            "url":"{{baseUrl}}",
+            "header":[
+              {
+                "key":"Content-Type",
+                "value":"application/x-www-form-urlencoded"
+              }
+            ],
+            "body":{
+              "mode":"urlencoded",
+              "urlencoded":[
+                {"key":"method","value":"TMG.device.location.get"},
+                {"key":"timestamp","value":"{{$timestamp}}"},
+                {"key":"app_key","value":"{{app_key}}"},
+                {"key":"sign_method","value":"md5"},
+                {"key":"v","value":"1.0"},
+                {"key":"format","value":"json"},
+                {"key":"access_token","value":"{{access_token}}"},
+                {"key":"imeis","value":"{{imei}}"},
+                {"key":"map_type","value":"GOOGLE"},
+                {"key":"sign","value":"{{GENERATED_SIGNATURE}}"}
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -18,16 +18,20 @@ const resolveOwner = async (user) => {
   if (role === "PARENT") {
     const parent = await getParentByUserId(user.id);
     if (!parent) return null;
-    return { parentId: parent.id, clientId: null };
+    return { parentId: parent.id, clientId: null, agentId: null };
   }
 
   if (role === "CLIENT") {
     const client = await getClientByUserId(user.id);
     if (!client) return null;
-    return { parentId: null, clientId: client.id };
+    return { parentId: null, clientId: client.id, agentId: null };
   }
-
-  return null; // ADMIN, DRIVER, AGENT etc. have no wallet
+  if (role === "AGENT") {
+    const agent = await getAgentByUserId(user.id);
+    if (!agent) return null;
+    return { parentId: null, clientId: null, agentId: agent.id };
+  }
+  return null; // ADMIN, DRIVER,  etc. have no wallet
 };
 
 /* ============================================================
@@ -51,7 +55,7 @@ export const topUp = async (req, res) => {
     if (!owner) {
       return res.status(403).json({
         success: false,
-        message: "Only PARENT or CLIENT accounts can top up a wallet.",
+        message: "Only PARENT, AGENT or CLIENT accounts can top up a wallet.",
       });
     }
 
@@ -86,7 +90,7 @@ export const balance = async (req, res) => {
     if (!owner) {
       return res.status(403).json({
         success: false,
-        message: "Only PARENT or CLIENT accounts have wallets.",
+        message: "Only PARENT, AGENT or CLIENT accounts have wallets.",
       });
     }
 
@@ -117,7 +121,7 @@ export const transactions = async (req, res) => {
     if (!owner) {
       return res.status(403).json({
         success: false,
-        message: "Only PARENT or CLIENT accounts have wallets.",
+        message: "Only PARENT, AGENT or CLIENT accounts have wallets.",
       });
     }
 
