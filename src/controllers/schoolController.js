@@ -8,41 +8,58 @@ export const getSchool = async (req, res) => {
   res.json(await prisma.school.findUnique({ where: { id: Number(req.params.id) } }));
 };
 
-export const createSchool = async (req, res) => {
+export const onboardSchool = async (req, res) => {
   try {
     const user = req.user;
 
     if (!user) {
-      return res.status(401).json({
-        message: "Unauthorized"
-      });
+      return res.status(401).json({ message: "Unauthorized" });
     }
 
-    // Allow only SYSTEM_ADMIN or AGENT
-    if (!["SYSTEM_ADMIN", "AGENT"].includes(user.role)) {
-      return res.status(403).json({
-        message: "You are not allowed to create schools"
-      });
+    if (!["AGENT", "SYSTEM_ADMIN"].includes(user.role)) {
+      return res.status(403).json({ message: "Not allowed" });
     }
+
+    const {
+      schoolName,
+      schoolCode,
+      county,
+      email,
+      phone,
+      buses,
+      tier,
+    } = req.body;
 
     const school = await prisma.school.create({
       data: {
-        ...req.body,
+        name: schoolName,
+        code: schoolCode,
+        county,
+        email,
+        phone,
+        buses,
+        tier,
 
-        // IMPORTANT: enforce tenant isolation
+        // 🔥 IMPORTANT: multi-tenant safety
         tenantId: user.tenantId,
 
-        // OPTIONAL: track who created it
+        // 🔥 track ownership
         createdById: user.id,
+        agentId: user.role === "AGENT" ? user.id : null,
       },
     });
 
-    return res.status(201).json(school);
+    return res.status(201).json({
+      success: true,
+      schoolId: school.id,
+      school,
+    });
 
   } catch (err) {
-    console.error("[createSchool]", err);
+    console.error("[onboardSchool]", err);
     return res.status(500).json({
-      message: "Failed to create school"
+      success: false,
+      message: "Failed to onboard school",
     });
   }
 };
