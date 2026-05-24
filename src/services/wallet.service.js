@@ -22,6 +22,9 @@ export const getClientByUserId = async (userId) => {
   return prisma.client.findFirst({ where: { userId } });
 };
 
+export const getAgentByUserId = async (userId) => {
+  return prisma.agent.findFirst({ where: { userId } });
+};
 /* ============================================================
    WALLET READ
 ============================================================ */
@@ -30,12 +33,13 @@ export const getClientByUserId = async (userId) => {
  * Fetch a wallet by parentId or clientId.
  * Returns { id: null, balance: 0 } if no wallet exists yet.
  */
-export const getWallet = async ({ parentId = null, clientId = null }) => {
+export const getWallet = async ({ parentId = null, clientId = null, agentId = null }) => {
   const wallet = await prisma.wallet.findFirst({
     where: {
       OR: [
         parentId ? { parentId } : null,
         clientId ? { clientId } : null,
+        agentId ? { agentId } : null,
       ].filter(Boolean),
     },
   });
@@ -46,8 +50,8 @@ export const getWallet = async ({ parentId = null, clientId = null }) => {
 /**
  * Return only the numeric balance.
  */
-export const getBalance = async ({ parentId = null, clientId = null }) => {
-  const wallet = await getWallet({ parentId, clientId });
+export const getBalance = async ({ parentId = null, clientId = null, agentId = null }) => {
+  const wallet = await getWallet({ parentId, clientId, agentId });
   return wallet.balance;
 };
 
@@ -66,6 +70,7 @@ export const getBalance = async ({ parentId = null, clientId = null }) => {
 export const creditWallet = async ({
   parentId = null,
   clientId = null,
+  agentId = null,
   amount,
   reference = null,
 }) => {
@@ -83,6 +88,7 @@ export const creditWallet = async ({
       create: {
         parentId: parentId ?? null,
         clientId: clientId ?? null,
+        agentId: agentId ?? null,
         balance: amount,
       },
     });
@@ -92,6 +98,7 @@ export const creditWallet = async ({
         walletId:  wallet.id,
         parentId:  parentId ?? null,
         clientId:  clientId ?? null,
+        agentId:   agentId ?? null,
         amount,
         type:      "DEPOSIT",    // ✅ fixed: was "CREDIT" — enum is DEPOSIT/DEDUCTION
         status:    "SUCCESS",
@@ -122,6 +129,7 @@ export const creditWallet = async ({
 export const deductWallet = async ({
   parentId = null,
   clientId = null,
+  agentId = null,
   amount,
   reference = null,
 }) => {
@@ -135,6 +143,7 @@ export const deductWallet = async ({
         OR: [
           parentId ? { parentId } : null,
           clientId ? { clientId } : null,
+          agentId ? { agentId } : null,
         ].filter(Boolean),
       },
     });
@@ -162,6 +171,7 @@ export const deductWallet = async ({
         walletId:  wallet.id,
         parentId:  parentId ?? null,
         clientId:  clientId ?? null,
+        agentId:   agentId ?? null,
         amount,
         type:      "DEDUCTION",  // ✅ fixed: was "DEBIT" — enum is DEPOSIT/DEDUCTION
         status:    "SUCCESS",
