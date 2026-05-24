@@ -5,6 +5,7 @@ import {
   getWallet,
   getParentByUserId,   // ✅ now exported from wallet.service.js
   getClientByUserId,   // ✅ now exported from wallet.service.js
+  getAgentByUserId,    // ✅ now exported from wallet.service.js
 } from "../services/wallet.service.js";
 import prisma from "../middleware/prisma.js";
 
@@ -128,7 +129,7 @@ export const transactions = async (req, res) => {
     // Find the wallet first so we can query its transactions
     const wallet = await getWallet(owner);
 
-    if (!wallet.id) {
+    if (!wallet || !wallet.id) {
       // No wallet yet — return empty list, not an error
       return res.status(200).json({
         success: true,
