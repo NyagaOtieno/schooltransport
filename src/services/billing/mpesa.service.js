@@ -1,25 +1,29 @@
 // src/services/billing/mpesa.service.js
 import axios from "axios";
 
-const IS_SANDBOX  = process.env.MPESA_ENV !== "production";
-const BASE_URL    = IS_SANDBOX
+/* ============================================================
+   CONFIG — all from .env
+============================================================ */
+const IS_SANDBOX      = process.env.MPESA_ENV !== "production";
+const BASE_URL        = IS_SANDBOX
   ? "https://sandbox.safaricom.co.ke"
   : "https://api.safaricom.co.ke";
 
 const CONSUMER_KEY    = process.env.MPESA_CONSUMER_KEY;
 const CONSUMER_SECRET = process.env.MPESA_CONSUMER_SECRET;
-const SHORTCODE       = process.env.MPESA_SHORTCODE;
+const SHORTCODE       = process.env.MPESA_SHORTCODE;           // STK push paybill/till
 const PASSKEY         = process.env.MPESA_PASSKEY;
-const B2C_SHORTCODE   = process.env.MPESA_B2C_SHORTCODE || SHORTCODE;
+const C2B_SHORTCODE   = process.env.MPESA_C2B_SHORTCODE || process.env.MPESA_SHORTCODE;
+const B2C_SHORTCODE   = process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE;
 const B2C_INITIATOR   = process.env.MPESA_B2C_INITIATOR_NAME;
 const B2C_CREDENTIAL  = process.env.MPESA_B2C_SECURITY_CREDENTIAL;
-const CALLBACK_BASE   = process.env.MPESA_CALLBACK_BASE_URL;
+const CALLBACK_BASE   = process.env.MPESA_CALLBACK_BASE_URL;   // e.g. https://schooltransport-production.up.railway.app
 
 /* ============================================================
-   ACCESS TOKEN — cached, auto-refreshed
+   ACCESS TOKEN — cached, auto-refreshed 30s before expiry
 ============================================================ */
-let _token        = null;
-let _tokenExpiry  = 0;
+let _token       = null;
+let _tokenExpiry = 0;
 
 export const getAccessToken = async () => {
   if (_token && Date.now() < _tokenExpiry) return _token;
@@ -39,38 +43,54 @@ export const getAccessToken = async () => {
    HELPERS
 ============================================================ */
 
-/** Timestamp: YYYYMMDDHHmmss */
-const timestamp = () => {
+/** Daraja timestamp format: YYYYMMDDHHmmss */
+export const mpesaTimestamp = () => {
   const d   = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   return [
-    d.getFullYear(), pad(d.getMonth() + 1), pad(d.getDate()),
-    pad(d.getHours()), pad(d.getMinutes()), pad(d.getSeconds()),
+    d.getFullYear(),
+    pad(d.getMonth() + 1),
+    pad(d.getDate()),
+    pad(d.getHours()),
+    pad(d.getMinutes()),
+    pad(d.getSeconds()),
   ].join("");
 };
 
 /** STK password = Base64(shortcode + passkey + timestamp) */
-const buildStkPassword = (ts) =>
+export const buildStkPassword = (ts) =>
   Buffer.from(`${SHORTCODE}${PASSKEY}${ts}`).toString("base64");
 
 /**
- * Normalize phone to 2547XXXXXXXX.
- * Accepts: 0712345678 / +254712345678 / 712345678
+ * Normalize a Kenyan phone to 2547XXXXXXXX / 2541XXXXXXXX.
+ * Accepts: 0712345678 | +254712345678 | 712345678 | 254712345678
  */
 export const normalizePhone = (phone) => {
   const digits = String(phone).replace(/\D/g, "");
-  if (digits.startsWith("254")) return digits;
-  if (digits.startsWith("0"))   return "254" + digits.slice(1);
-  if (digits.startsWith("7") || digits.startsWith("1")) return "254" + digits;
+  if (digits.startsWith("254") && digits.length === 12) return digits;
+  if (digits.startsWith("0")   && digits.length === 10) return "254" + digits.slice(1);
+  if ((digits.startsWith("7") || digits.startsWith("1")) && digits.length === 9) return "254" + digits;
   return digits;
 };
 
 /* ============================================================
-   STK PUSH — C2B (parent tops up wallet)
+   STK PUSH (Lipa na M-Pesa Online — business-initiated)
+   Flow: backend sends prompt → user enters PIN on their phone
+         → Safaricom calls /api/mpesa/callback
 ============================================================ */
-export const initiateSTKPush = async ({ phone, amount, accountRef, description = "Wallet Top Up" }) => {
+
+/**
+ * @param {{ phone: string, amount: number, accountRef: string, description?: string }}
+ * @returns Daraja STK response: { MerchantRequestID, CheckoutRequestID, ResponseCode, ... }
+ */
+export const initiateSTKPush = async ({
+  phone,
+  amount,
+  accountRef,
+  description = "Wallet Top Up",
+}) => {
   const token = await getAccessToken();
-  const ts    = timestamp();
+  const ts    = mpesaTimestamp();
 
   const { data } = await axios.post(
     `${BASE_URL}/mpesa/stkpush/v1/processrequest`,
@@ -79,13 +99,13 @@ export const initiateSTKPush = async ({ phone, amount, accountRef, description =
       Password:          buildStkPassword(ts),
       Timestamp:         ts,
       TransactionType:   "CustomerPayBillOnline",
-      Amount:            Math.ceil(amount),
+      Amount:            Math.ceil(amount),        // M-Pesa requires whole KES
       PartyA:            normalizePhone(phone),
       PartyB:            SHORTCODE,
       PhoneNumber:       normalizePhone(phone),
-      CallBackURL:       `${CALLBACK_BASE}/api/mpesa/callback`,
-      AccountReference:  accountRef,
-      TransactionDesc:   description,
+      CallBackURL:       `${CALLBACK_BASE}/api/mpesa/stk-callback`,
+      AccountReference:  String(accountRef).slice(0, 12),  // max 12 chars
+      TransactionDesc:   String(description).slice(0, 13), // max 13 chars
     },
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -95,10 +115,11 @@ export const initiateSTKPush = async ({ phone, amount, accountRef, description =
 
 /* ============================================================
    STK STATUS QUERY
+   Poll Daraja directly (optional — we also poll our own DB)
 ============================================================ */
 export const querySTKStatus = async (checkoutRequestId) => {
   const token = await getAccessToken();
-  const ts    = timestamp();
+  const ts    = mpesaTimestamp();
 
   const { data } = await axios.post(
     `${BASE_URL}/mpesa/stkpushquery/v1/query`,
@@ -115,13 +136,70 @@ export const querySTKStatus = async (checkoutRequestId) => {
 };
 
 /* ============================================================
-   B2C — Agent withdrawal to M-Pesa
+   C2B — REGISTER URLS (run once per shortcode, or on startup)
+   Tells Safaricom where to send validation + confirmation.
+
+   ValidationURL  → called BEFORE payment is processed (optional)
+   ConfirmationURL → called AFTER payment succeeds (required)
+
+   ResponseType:
+     "Completed"  = auto-accept all payments (skip validation)
+     "Cancelled"  = auto-reject if validation URL is down
 ============================================================ */
-export const initiateB2C = async ({ phone, amount, remarks = "Agent Withdrawal", occasion = "Withdrawal" }) => {
+export const registerC2BUrls = async (responseType = "Completed") => {
   const token = await getAccessToken();
 
   const { data } = await axios.post(
-    `${BASE_URL}/mpesa/b2c/v3/paymentrequest`,
+    `${BASE_URL}/mpesa/c2b/v1/registerurl`,
+    {
+      ShortCode:       C2B_SHORTCODE,
+      ResponseType:    responseType,
+      ConfirmationURL: `${CALLBACK_BASE}/api/mpesa/c2b/confirm`,
+      ValidationURL:   `${CALLBACK_BASE}/api/mpesa/c2b/validate`,
+    },
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  return data;
+};
+
+/* ============================================================
+   C2B — SIMULATE (sandbox testing only)
+   Simulates a customer paying via M-Pesa menu (paybill).
+   CommandID: "CustomerPayBillOnline" | "CustomerBuyGoodsOnline"
+============================================================ */
+export const simulateC2B = async ({ phone, amount, billRef = "TEST" }) => {
+  const token = await getAccessToken();
+
+  const { data } = await axios.post(
+    `${BASE_URL}/mpesa/c2b/v1/simulate`,
+    {
+      ShortCode:     C2B_SHORTCODE,
+      CommandID:     "CustomerPayBillOnline",
+      Amount:        Math.ceil(amount),
+      Msisdn:        normalizePhone(phone),
+      BillRefNumber: String(billRef).slice(0, 20),  // account reference / TRK-userId
+    },
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  return data;
+};
+
+/* ============================================================
+   B2C — AGENT WITHDRAWAL
+   Business sends money to agent's M-Pesa number.
+============================================================ */
+export const initiateB2C = async ({
+  phone,
+  amount,
+  remarks  = "Agent Withdrawal",
+  occasion = "Withdrawal",
+}) => {
+  const token = await getAccessToken();
+
+  const { data } = await axios.post(
+    `${BASE_URL}/mpesa/b2c/v1/paymentrequest`,  // v1 matches Postman collection
     {
       InitiatorName:      B2C_INITIATOR,
       SecurityCredential: B2C_CREDENTIAL,
@@ -130,8 +208,8 @@ export const initiateB2C = async ({ phone, amount, remarks = "Agent Withdrawal",
       PartyA:             B2C_SHORTCODE,
       PartyB:             normalizePhone(phone),
       Remarks:            remarks,
-      QueueTimeOutURL:    `${CALLBACK_BASE}/api/mpesa/b2c-timeout`,
-      ResultURL:          `${CALLBACK_BASE}/api/mpesa/b2c-callback`,
+      QueueTimeOutURL:    `${CALLBACK_BASE}/api/mpesa/b2c/timeout`,
+      ResultURL:          `${CALLBACK_BASE}/api/mpesa/b2c/callback`,
       Occasion:           occasion,
     },
     { headers: { Authorization: `Bearer ${token}` } }
