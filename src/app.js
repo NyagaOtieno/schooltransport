@@ -1,23 +1,12 @@
-// -----------------------------
-// Load environment first
-// -----------------------------
+// src/app.js
 import dotenv from "dotenv";
 dotenv.config();
 
-// -----------------------------
-// Core dependencies
-// -----------------------------
 import express from "express";
 import cors from "cors";
-
-// -----------------------------
-// Prisma
-// -----------------------------
 import prisma from "./middleware/prisma.js";
 
-// -----------------------------
-// Route imports
-// -----------------------------
+// ── Routes ──────────────────────────────────────────────────
 import smsRoutes          from "./routes/sms.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import manifestRoutes     from "./routes/manifestRoutes.js";
@@ -33,30 +22,22 @@ import tenantRoutes       from "./routes/tenantRoutes.js";
 import parentRoutes       from "./routes/parentRoutes.js";
 import bootstrapRoutes    from "./routes/bootstrap.routes.js";
 import trackingRoutes     from "./routes/trackingRoutes.js";
-import walletRoutes       from "./routes/wallet.routes.js";  // ✅ fixed: matches actual filename casing
-import agentRoutes        from "./routes/agent.routes.js";   // ✅ added: was missing entirely
+import walletRoutes       from "./routes/wallet.routes.js";
+import agentRoutes        from "./routes/agent.routes.js";
+import mpesaRoutes        from "./routes/mpesa.routes.js";   // ✅ NEW
 
-// -----------------------------
-// App init
-// -----------------------------
 const app = express();
 
-// -----------------------------
-// Body parsing
-// -----------------------------
+// ── Body parsing ─────────────────────────────────────────────
 app.use(express.json());
 
-// -----------------------------
-// Request logger — MUST be BEFORE routes
-// -----------------------------
+// ── Request logger — BEFORE routes ───────────────────────────
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
   next();
 });
 
-// -----------------------------
-// CORS
-// -----------------------------
+// ── CORS ─────────────────────────────────────────────────────
 const allowlist = (
   process.env.CORS_ORIGINS ||
   "https://trackmykid-webapp.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
@@ -77,32 +58,24 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
 app.options("*", cors());
 
-// -----------------------------
-// Health check
-// -----------------------------
+// ── Health check ─────────────────────────────────────────────
 app.get("/health", async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     return res.status(200).json({
-      success: true,
-      message: "API is running 🚀",
-      database: "connected",
+      success:   true,
+      message:   "API is running 🚀",
+      database:  "connected",
       timestamp: new Date().toISOString(),
     });
-  } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: "Database connection failed",
-    });
+  } catch {
+    return res.status(500).json({ success: false, message: "Database connection failed" });
   }
 });
 
-// -----------------------------
-// API routes
-// -----------------------------
+// ── API routes ───────────────────────────────────────────────
 app.use("/api/sms",            smsRoutes);
 app.use("/api/notifications",  notificationRoutes);
 app.use("/api/manifests",      manifestRoutes);
@@ -119,19 +92,16 @@ app.use("/api/parents",        parentRoutes);
 app.use("/api/auth/bootstrap", bootstrapRoutes);
 app.use("/api/tracking",       trackingRoutes);
 app.use("/api/wallet",         walletRoutes);
-app.use("/api/agents",         agentRoutes);  // ✅ added
+app.use("/api/agents",         agentRoutes);
+app.use("/api/mpesa",          mpesaRoutes);   // ✅ NEW
 
-// -----------------------------
-// 404 handler
-// -----------------------------
+// ── 404 ──────────────────────────────────────────────────────
 app.use((req, res) => {
-  console.warn(`404 → ${req.method} ${req.originalUrl}`);
+  console.warn(`404 -> ${req.method} ${req.originalUrl}`);
   res.status(404).json({ success: false, message: "Route not found" });
 });
 
-// -----------------------------
-// Global error handler
-// -----------------------------
+// ── Global error handler ─────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error("[GLOBAL ERROR]", err);
   res.status(500).json({ success: false, message: "Internal server error" });
