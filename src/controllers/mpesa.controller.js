@@ -1,60 +1,71 @@
 // src/controllers/mpesa.controller.js
 import prisma from "../middleware/prisma.js";
-
-// ✅ FIXED: wallet.service.js is at src/services/ — NOT src/services/billing/
 import {
-  getParentByUserId,
-  getClientByUserId,
+  getParentByUserId, getClientByUserId, getAgentByUserId,
+  creditAgentWallet,
 } from "../services/wallet.service.js";
-
-// mpesa.service.js IS in billing/
 import {
-  initiateSTKPush,
-  initiateB2C,
-  normalizePhone,
-  registerC2BUrls,
-  simulateC2B,
+  initiateSTKPush, initiateB2C, normalizePhone,
+  registerC2BUrls, simulateC2B,
 } from "../services/billing/mpesa.service.js";
 
 /* ============================================================
-   IN-MEMORY PENDING STK MAP
-   CheckoutRequestID → { transactionId, walletId, parentId, clientId, amount }
-   Survives a single instance — replace with Redis for multi-instance.
+   IN-MEMORY PENDING STK PUSH MAP
+   CheckoutRequestID → pending payment context
+   Replace with Redis for multi-instance deployments.
 ============================================================ */
 const pendingSTK = new Map();
 
 /* ============================================================
-   HELPER — resolve wallet owner (parentId or clientId) from JWT
+   HELPERS
 ============================================================ */
+
+/**
+ * Resolve the paying entity from a JWT user.
+ * Returns a typed owner object for both wallet types.
+ */
 const resolveOwner = async (user) => {
   const role = user?.role?.toUpperCase();
+
   if (role === "PARENT") {
     const parent = await getParentByUserId(user.id);
-    return parent ? { parentId: parent.id, clientId: null } : null;
+    return parent
+      ? { type: "wallet", parentId: parent.id, clientId: null }
+      : null;
   }
   if (role === "CLIENT") {
     const client = await getClientByUserId(user.id);
-    return client ? { parentId: null, clientId: client.id } : null;
+    return client
+      ? { type: "wallet", parentId: null, clientId: client.id }
+      : null;
+  }
+  if (role === "AGENT") {
+    const agent = await getAgentByUserId(user.id);    // includes { wallet }
+    return agent
+      ? { type: "agentWallet", agentId: agent.id, existingWallet: agent.wallet }
+      : null;
   }
   return null;
 };
 
-/** Get or create wallet for a parent/client */
+/** Get or create a Wallet for parent/client */
 const ensureWallet = async (tx, { parentId, clientId }) => {
   const where = parentId ? { parentId } : { clientId };
-  let wallet  = await tx.wallet.findFirst({ where });
-  if (!wallet) {
-    wallet = await tx.wallet.create({
-      data: { parentId: parentId ?? null, clientId: clientId ?? null, balance: 0 },
-    });
-  }
-  return wallet;
+  let w = await tx.wallet.findFirst({ where });
+  if (!w) w = await tx.wallet.create({ data: { parentId: parentId ?? null, clientId: clientId ?? null, balance: 0 } });
+  return w;
+};
+
+/** Get or create an AgentWallet */
+const ensureAgentWallet = async (tx, agentId) => {
+  let w = await tx.agentWallet.findUnique({ where: { agentId } });
+  if (!w) w = await tx.agentWallet.create({ data: { agentId, balance: 0 } });
+  return w;
 };
 
 /* ============================================================
    POST /api/mpesa/stk-push
-   Lipa na M-Pesa Online — sends STK prompt to user's phone.
-   Auth required. Roles: PARENT, CLIENT
+   Works for PARENT, CLIENT and AGENT.
    Body: { phone: string, amount: number }
 ============================================================ */
 export const stkPush = async (req, res) => {
@@ -63,86 +74,118 @@ export const stkPush = async (req, res) => {
     const phone  = req.body?.phone?.trim();
     const amount = Number(req.body?.amount);
 
-    if (!phone) {
-      return res.status(400).json({ success: false, message: "Phone number is required." });
-    }
-    if (!Number.isFinite(amount) || amount < 10) {
+    if (!phone) return res.status(400).json({ success: false, message: "Phone number is required." });
+    if (!Number.isFinite(amount) || amount < 10)
       return res.status(400).json({ success: false, message: "Minimum deposit is KES 10." });
-    }
 
     const owner = await resolveOwner(user);
     if (!owner) {
-      return res.status(403).json({
-        success: false,
-        message: "Only PARENT or CLIENT accounts can top up a wallet.",
+      return res.status(403).json({ success: false, message: "PARENT, CLIENT or AGENT accounts only." });
+    }
+
+    // ── Create PENDING transaction record ────────────────
+    let pendingRecord;
+
+    if (owner.type === "agentWallet") {
+      // Agent: ensure AgentWallet exists, then create AgentTransaction
+      const agentWallet = await prisma.$transaction(async (tx) => ensureAgentWallet(tx, owner.agentId));
+
+      pendingRecord = await prisma.agentTransaction.create({
+        data: {
+          walletId:      agentWallet.id,
+          type:          "TOPUP",
+          amount,
+          description:   "M-Pesa top-up (pending)",
+          reference:     null,       // filled after Daraja responds
+          balanceBefore: agentWallet.balance,
+          balanceAfter:  agentWallet.balance + amount,  // optimistic — updated on callback
+        },
+      });
+
+      // Store context for callback
+      pendingSTK.set("_agent_tx_" + pendingRecord.id, {
+        walletType:    "agentWallet",
+        agentId:       owner.agentId,
+        agentWalletId: agentWallet.id,
+        agentTxId:     pendingRecord.id,
+        amount,
+      });
+
+    } else {
+      // Parent / Client: ensure Wallet, create Transaction with PENDING status
+      const wallet = await prisma.$transaction(async (tx) =>
+        ensureWallet(tx, { parentId: owner.parentId, clientId: owner.clientId })
+      );
+
+      pendingRecord = await prisma.transaction.create({
+        data: {
+          walletId:  wallet.id,
+          parentId:  owner.parentId ?? null,
+          clientId:  owner.clientId ?? null,
+          amount,
+          type:      "DEPOSIT",
+          status:    "PENDING",
+          reference: null,
+        },
+      });
+
+      pendingSTK.set("_tx_" + pendingRecord.id, {
+        walletType:    "wallet",
+        walletId:      wallet.id,
+        parentId:      owner.parentId ?? null,
+        clientId:      owner.clientId ?? null,
+        transactionId: pendingRecord.id,
+        amount,
       });
     }
 
-    // Ensure wallet exists
-    const wallet = await prisma.$transaction(async (tx) => ensureWallet(tx, owner));
-
-    // Create PENDING transaction BEFORE calling Daraja
-    // (ensures a record exists even if the app crashes mid-request)
-    const pendingTx = await prisma.transaction.create({
-      data: {
-        walletId:  wallet.id,
-        parentId:  owner.parentId ?? null,
-        clientId:  owner.clientId ?? null,
-        amount,
-        type:      "DEPOSIT",
-        status:    "PENDING",
-        reference: null,
-      },
-    });
-
-    // Call Daraja STK Push
+    // ── Call Daraja ──────────────────────────────────────
     let darajaRes;
     try {
       darajaRes = await initiateSTKPush({
         phone,
         amount,
-        accountRef:  `TRK${user.id}`,
+        accountRef:  owner.type === "agentWallet" ? `TRKA${user.id}` : `TRK${user.id}`,
         description: "Wallet TopUp",
       });
     } catch (darajaErr) {
-      await prisma.transaction.update({
-        where: { id: pendingTx.id },
-        data:  { status: "FAILED" },
-      });
+      // Mark failed
+      if (owner.type === "agentWallet") {
+        await prisma.agentTransaction.update({
+          where: { id: pendingRecord.id },
+          data:  { description: "M-Pesa top-up FAILED — Daraja unreachable" },
+        });
+      } else {
+        await prisma.transaction.update({ where: { id: pendingRecord.id }, data: { status: "FAILED" } });
+      }
       console.error("[stkPush] Daraja error:", darajaErr?.response?.data ?? darajaErr.message);
-      return res.status(502).json({
-        success: false,
-        message: "Could not reach M-Pesa. Please try again.",
-      });
+      return res.status(502).json({ success: false, message: "Could not reach M-Pesa. Please try again." });
     }
 
     if (darajaRes.ResponseCode !== "0") {
-      await prisma.transaction.update({
-        where: { id: pendingTx.id },
-        data:  { status: "FAILED" },
-      });
-      return res.status(400).json({
-        success: false,
-        message: darajaRes.ResponseDescription || "STK Push failed.",
-      });
+      if (owner.type === "agentWallet") {
+        await prisma.agentTransaction.update({ where: { id: pendingRecord.id }, data: { description: "M-Pesa top-up FAILED" } });
+      } else {
+        await prisma.transaction.update({ where: { id: pendingRecord.id }, data: { status: "FAILED" } });
+      }
+      return res.status(400).json({ success: false, message: darajaRes.ResponseDescription || "STK Push failed." });
     }
 
     const checkoutRequestId = darajaRes.CheckoutRequestID;
 
-    // Persist CheckoutRequestID on the transaction
-    await prisma.transaction.update({
-      where: { id: pendingTx.id },
-      data:  { reference: checkoutRequestId },
-    });
-
-    // Cache for callback lookup
-    pendingSTK.set(checkoutRequestId, {
-      transactionId: pendingTx.id,
-      walletId:      wallet.id,
-      parentId:      owner.parentId ?? null,
-      clientId:      owner.clientId ?? null,
-      amount,
-    });
+    // Save CheckoutRequestID on the transaction record
+    if (owner.type === "agentWallet") {
+      await prisma.agentTransaction.update({ where: { id: pendingRecord.id }, data: { reference: checkoutRequestId } });
+      // Re-key the pending map by checkoutRequestId for callback lookup
+      const ctx = pendingSTK.get("_agent_tx_" + pendingRecord.id);
+      pendingSTK.delete("_agent_tx_" + pendingRecord.id);
+      pendingSTK.set(checkoutRequestId, ctx);
+    } else {
+      await prisma.transaction.update({ where: { id: pendingRecord.id }, data: { reference: checkoutRequestId } });
+      const ctx = pendingSTK.get("_tx_" + pendingRecord.id);
+      pendingSTK.delete("_tx_" + pendingRecord.id);
+      pendingSTK.set(checkoutRequestId, ctx);
+    }
 
     return res.status(200).json({
       success:           true,
@@ -158,11 +201,10 @@ export const stkPush = async (req, res) => {
 
 /* ============================================================
    POST /api/mpesa/stk-callback
-   ⚠️  PUBLIC — Safaricom calls this after user enters PIN.
-   Always respond 200 immediately (Safaricom retries on timeout).
+   ⚠️  PUBLIC — Safaricom posts result here.
+   Handles BOTH parent/client wallet and agent wallet.
 ============================================================ */
 export const stkCallback = async (req, res) => {
-  // Respond immediately so Safaricom doesn't retry
   res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted" });
 
   try {
@@ -172,101 +214,103 @@ export const stkCallback = async (req, res) => {
     const checkoutRequestId = callback.CheckoutRequestID;
     const resultCode        = Number(callback.ResultCode);
 
-    const pending = pendingSTK.get(checkoutRequestId);
-    if (!pending) {
-      // Might have been handled already or server restarted — look up by reference
+    // Look up pending context
+    let p = pendingSTK.get(checkoutRequestId);
+
+    // If not in memory (server restarted), recover from DB
+    if (!p) {
       const tx = await prisma.transaction.findFirst({
         where: { reference: checkoutRequestId, status: "PENDING" },
       });
-      if (!tx) {
-        console.warn("[stkCallback] Unknown CheckoutRequestID:", checkoutRequestId);
-        return;
+      if (tx) {
+        p = { walletType: "wallet", walletId: tx.walletId, transactionId: tx.id, parentId: tx.parentId, clientId: tx.clientId, amount: tx.amount };
+      } else {
+        const agentTx = await prisma.agentTransaction.findFirst({ where: { reference: checkoutRequestId } });
+        if (agentTx) {
+          const aw = await prisma.agentWallet.findUnique({ where: { id: agentTx.walletId } });
+          p = { walletType: "agentWallet", agentId: aw?.agentId, agentWalletId: agentTx.walletId, agentTxId: agentTx.id, amount: agentTx.amount };
+        }
       }
-      // Reconstruct pending from DB
-      const wallet = await prisma.wallet.findUnique({ where: { id: tx.walletId } });
-      if (wallet) {
-        pendingSTK.set(checkoutRequestId, {
-          transactionId: tx.id,
-          walletId:      tx.walletId,
-          parentId:      tx.parentId,
-          clientId:      tx.clientId,
-          amount:        tx.amount,
-        });
-      }
+      if (!p) { console.warn("[stkCallback] Unknown CheckoutRequestID:", checkoutRequestId); return; }
     }
 
-    const p = pendingSTK.get(checkoutRequestId);
     pendingSTK.delete(checkoutRequestId);
 
-    if (!p) return;
+    // Extract Safaricom metadata
+    const items    = callback.CallbackMetadata?.Item ?? [];
+    const getMeta  = (name) => items.find((i) => i.Name === name)?.Value ?? null;
+    const paidAmt  = Number(getMeta("Amount")) || p.amount;
+    const receipt  = getMeta("MpesaReceiptNumber");
 
     if (resultCode !== 0) {
-      await prisma.transaction.update({
-        where: { id: p.transactionId },
-        data:  { status: "FAILED" },
-      });
+      // Payment cancelled / failed
+      if (p.walletType === "agentWallet") {
+        await prisma.agentTransaction.update({
+          where: { id: p.agentTxId },
+          data:  { description: `M-Pesa top-up FAILED — ${callback.ResultDesc}` },
+        });
+      } else {
+        await prisma.transaction.update({ where: { id: p.transactionId }, data: { status: "FAILED" } });
+      }
       console.log(`[stkCallback] ❌ Payment failed (${resultCode}): ${callback.ResultDesc}`);
       return;
     }
 
-    // Extract Safaricom metadata
-    const items   = callback.CallbackMetadata?.Item ?? [];
-    const getMeta = (name) => items.find((i) => i.Name === name)?.Value ?? null;
-
-    const paidAmount = Number(getMeta("Amount")) || p.amount;
-    const receipt    = getMeta("MpesaReceiptNumber");
-    const paidPhone  = getMeta("PhoneNumber");
-
-    // Credit wallet + mark SUCCESS — atomically
-    await prisma.$transaction([
-      prisma.wallet.update({
-        where: { id: p.walletId },
-        data:  { balance: { increment: paidAmount } },
-      }),
-      prisma.transaction.update({
-        where: { id: p.transactionId },
-        data:  {
-          amount:    paidAmount,
-          status:    "SUCCESS",
-          reference: receipt ?? checkoutRequestId,
-        },
-      }),
-    ]);
-
-    console.log(`[stkCallback] ✅ KES ${paidAmount} credited — wallet: ${p.walletId}, receipt: ${receipt}, phone: ${paidPhone}`);
+    // ── SUCCESS — credit correct wallet ─────────────────
+    if (p.walletType === "agentWallet") {
+      await prisma.$transaction([
+        prisma.agentWallet.update({ where: { id: p.agentWalletId }, data: { balance: { increment: paidAmt } } }),
+        prisma.agentTransaction.update({
+          where: { id: p.agentTxId },
+          data:  { amount: paidAmt, reference: receipt ?? checkoutRequestId, description: `M-Pesa top-up — ${receipt}`, balanceAfter: (await prisma.agentWallet.findUnique({ where: { id: p.agentWalletId }, select: { balance: true } })).balance + paidAmt },
+        }),
+      ]);
+      console.log(`[stkCallback] ✅ AgentWallet ${p.agentWalletId} +KES ${paidAmt} — receipt: ${receipt}`);
+    } else {
+      await prisma.$transaction([
+        prisma.wallet.update({ where: { id: p.walletId }, data: { balance: { increment: paidAmt } } }),
+        prisma.transaction.update({
+          where: { id: p.transactionId },
+          data:  { amount: paidAmt, status: "SUCCESS", reference: receipt ?? checkoutRequestId },
+        }),
+      ]);
+      console.log(`[stkCallback] ✅ Wallet ${p.walletId} +KES ${paidAmt} — receipt: ${receipt}`);
+    }
   } catch (err) {
-    console.error("[stkCallback] Error processing callback:", err);
+    console.error("[stkCallback] Error:", err);
   }
 };
 
 /* ============================================================
    GET /api/mpesa/stk-status/:checkoutRequestId
-   Frontend polls this every 3s after STK push.
-   Auth required.
+   Frontend polls this every 3s. Works for both wallet types.
 ============================================================ */
 export const stkStatus = async (req, res) => {
   try {
     const { checkoutRequestId } = req.params;
+    if (!checkoutRequestId) return res.status(400).json({ success: false, message: "checkoutRequestId required." });
 
-    if (!checkoutRequestId) {
-      return res.status(400).json({ success: false, message: "checkoutRequestId required." });
-    }
-
-    const transaction = await prisma.transaction.findFirst({
+    // Check parent/client Transaction first
+    const tx = await prisma.transaction.findFirst({
       where:  { reference: checkoutRequestId },
-      select: { status: true, amount: true, createdAt: true },
+      select: { status: true, amount: true },
     });
+    if (tx) return res.status(200).json({ success: true, status: tx.status, amount: tx.amount });
 
-    if (!transaction) {
-      // STK was just sent — might not be saved yet
-      return res.status(200).json({ success: true, status: "PENDING" });
+    // Check AgentTransaction
+    const agentTx = await prisma.agentTransaction.findFirst({
+      where:  { reference: checkoutRequestId },
+      select: { description: true, amount: true },
+    });
+    if (agentTx) {
+      const failed  = agentTx.description?.includes("FAILED");
+      const success = agentTx.description?.includes("top-up —");
+      const status  = failed ? "FAILED" : success ? "SUCCESS" : "PENDING";
+      return res.status(200).json({ success: true, status, amount: agentTx.amount });
     }
 
-    return res.status(200).json({
-      success: true,
-      status:  transaction.status,   // PENDING | SUCCESS | FAILED
-      amount:  transaction.amount,
-    });
+    // Not yet written — still PENDING
+    return res.status(200).json({ success: true, status: "PENDING" });
   } catch (err) {
     console.error("[stkStatus]", err);
     return res.status(500).json({ success: false, message: "Failed to check payment status." });
@@ -274,201 +318,108 @@ export const stkStatus = async (req, res) => {
 };
 
 /* ============================================================
-   C2B — REGISTER URLS
-   POST /api/mpesa/c2b/register
-   One-time call per shortcode. Run manually or on server startup.
-   Auth required. Role: ADMIN or SYSTEM_ADMIN
+   C2B REGISTER — POST /api/mpesa/c2b/register  (ADMIN only)
 ============================================================ */
 export const c2bRegister = async (req, res) => {
   try {
-    const role = req.user?.role?.toUpperCase();
-    if (role !== "ADMIN" && role !== "SYSTEM_ADMIN") {
+    if (!["ADMIN", "SYSTEM_ADMIN"].includes(req.user?.role?.toUpperCase())) {
       return res.status(403).json({ success: false, message: "ADMIN only." });
     }
-
-    const responseType = req.body?.responseType || "Completed";
-    const result = await registerC2BUrls(responseType);
-
-    return res.status(200).json({
-      success: true,
-      message: "C2B URLs registered with Safaricom.",
-      data:    result,
-    });
+    const result = await registerC2BUrls(req.body?.responseType || "Completed");
+    return res.status(200).json({ success: true, message: "C2B URLs registered.", data: result });
   } catch (err) {
     console.error("[c2bRegister]", err?.response?.data ?? err.message);
-    return res.status(502).json({
-      success: false,
-      message: "Failed to register C2B URLs.",
-      detail:  err?.response?.data,
-    });
+    return res.status(502).json({ success: false, message: "Failed to register C2B URLs.", detail: err?.response?.data });
   }
 };
 
 /* ============================================================
-   C2B — VALIDATION URL
-   POST /api/mpesa/c2b/validate
-   ⚠️  PUBLIC — Safaricom calls this BEFORE processing a payment.
-   Return { ResultCode: 0 } to accept, { ResultCode: C2B00011 } to reject.
-
-   Use this to check if the BillRefNumber (accountRef) maps to a real user.
+   C2B VALIDATE — POST /api/mpesa/c2b/validate  (PUBLIC)
 ============================================================ */
 export const c2bValidate = async (req, res) => {
-  try {
-    const { BillRefNumber, TransactionAmount, MSISDN } = req.body;
-
-    console.log(`[c2bValidate] Incoming — phone: ${MSISDN}, ref: ${BillRefNumber}, amount: ${TransactionAmount}`);
-
-    // BillRefNumber = "TRK-{userId}" that we set on the STK push / mobile app
-    const userId = extractUserIdFromRef(BillRefNumber);
-
-    if (!userId) {
-      console.warn(`[c2bValidate] Rejected — unknown BillRefNumber: ${BillRefNumber}`);
-      return res.status(200).json({
-        ResultCode:    "C2B00011",
-        ResultDesc:    "Rejected: unknown account reference",
-      });
-    }
-
-    // Accept
-    return res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted" });
-  } catch (err) {
-    console.error("[c2bValidate] Error:", err);
-    // Accept on error — do not block payments over a server bug
-    return res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted" });
-  }
+  const { BillRefNumber } = req.body;
+  const userId = extractUserIdFromRef(BillRefNumber);
+  if (!userId) return res.status(200).json({ ResultCode: "C2B00011", ResultDesc: "Unknown account reference" });
+  return res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted" });
 };
 
 /* ============================================================
-   C2B — CONFIRMATION URL
-   POST /api/mpesa/c2b/confirm
-   ⚠️  PUBLIC — Safaricom calls this AFTER payment is processed.
-   Credit the correct wallet based on BillRefNumber.
+   C2B CONFIRM — POST /api/mpesa/c2b/confirm  (PUBLIC)
+   Credits parent/client Wallet OR agent AgentWallet
+   based on the BillRefNumber prefix:
+     TRK{userId}  → parent or client
+     TRKA{userId} → agent
 ============================================================ */
 export const c2bConfirm = async (req, res) => {
-  // Respond immediately
   res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted" });
 
   try {
-    const {
-      TransactionType,
-      TransID,          // M-Pesa receipt number
-      TransTime,
-      TransAmount,
-      BusinessShortCode,
-      BillRefNumber,    // accountRef we set: "TRK{userId}" or custom
-      MSISDN,           // customer phone
-      FirstName,
-    } = req.body;
-
+    const { TransID, TransAmount, BillRefNumber, MSISDN } = req.body;
     const amount = Number(TransAmount);
-    console.log(`[c2bConfirm] ✅ Payment received — receipt: ${TransID}, amount: KES ${amount}, phone: ${MSISDN}, ref: ${BillRefNumber}`);
 
-    // Resolve who paid
-    const userId = extractUserIdFromRef(BillRefNumber);
-    if (!userId) {
-      console.warn(`[c2bConfirm] Cannot resolve userId from ref: ${BillRefNumber}`);
-      return;
-    }
+    console.log(`[c2bConfirm] receipt: ${TransID}, amount: KES ${amount}, ref: ${BillRefNumber}, phone: ${MSISDN}`);
 
-    // Try parent first, then client
-    let owner = null;
-    const parent = await getParentByUserId(userId);
-    if (parent) {
-      owner = { parentId: parent.id, clientId: null };
+    // Idempotency check
+    const existing = await prisma.transaction.findFirst({ where: { reference: TransID } }) ||
+                     await prisma.agentTransaction.findFirst({ where: { reference: TransID } });
+    if (existing) { console.warn(`[c2bConfirm] Duplicate TransID: ${TransID}`); return; }
+
+    const isAgent  = /^TRKA/i.test(BillRefNumber);
+    const userId   = extractUserIdFromRef(BillRefNumber);
+    if (!userId) { console.warn(`[c2bConfirm] Cannot resolve userId from: ${BillRefNumber}`); return; }
+
+    if (isAgent) {
+      // Credit AgentWallet
+      const agent = await getAgentByUserId(userId);
+      if (!agent) { console.warn(`[c2bConfirm] No agent for userId: ${userId}`); return; }
+      await creditAgentWallet({ agentId: agent.id, amount, type: "TOPUP", description: `C2B top-up — ${TransID}`, reference: TransID });
+      console.log(`[c2bConfirm] ✅ AgentWallet credited KES ${amount} — agent: ${agent.id}`);
     } else {
-      const client = await getClientByUserId(userId);
-      if (client) owner = { parentId: null, clientId: client.id };
+      // Credit parent or client Wallet
+      let owner = null;
+      const parent = await getParentByUserId(userId);
+      if (parent) { owner = { parentId: parent.id, clientId: null }; }
+      else {
+        const client = await getClientByUserId(userId);
+        if (client) owner = { parentId: null, clientId: client.id };
+      }
+      if (!owner) { console.warn(`[c2bConfirm] No parent/client for userId: ${userId}`); return; }
+
+      const wallet = await prisma.$transaction(async (tx) =>
+        ensureWallet(tx, owner)
+      );
+      await prisma.$transaction([
+        prisma.wallet.update({ where: { id: wallet.id }, data: { balance: { increment: amount } } }),
+        prisma.transaction.create({
+          data: { walletId: wallet.id, parentId: owner.parentId ?? null, clientId: owner.clientId ?? null, amount, type: "DEPOSIT", status: "SUCCESS", reference: TransID },
+        }),
+      ]);
+      console.log(`[c2bConfirm] ✅ Wallet credited KES ${amount} — wallet: ${wallet.id}`);
     }
-
-    if (!owner) {
-      console.warn(`[c2bConfirm] No parent/client profile for userId: ${userId}`);
-      return;
-    }
-
-    // Get or create wallet
-    const wallet = await prisma.$transaction(async (tx) => ensureWallet(tx, owner));
-
-    // Check for duplicate (idempotency) — TransID is unique per payment
-    const existing = await prisma.transaction.findFirst({
-      where: { reference: TransID },
-    });
-    if (existing) {
-      console.warn(`[c2bConfirm] Duplicate — TransID ${TransID} already recorded`);
-      return;
-    }
-
-    // Credit wallet + create transaction record
-    await prisma.$transaction([
-      prisma.wallet.update({
-        where: { id: wallet.id },
-        data:  { balance: { increment: amount } },
-      }),
-      prisma.transaction.create({
-        data: {
-          walletId:  wallet.id,
-          parentId:  owner.parentId ?? null,
-          clientId:  owner.clientId ?? null,
-          amount,
-          type:      "DEPOSIT",
-          status:    "SUCCESS",
-          reference: TransID,
-        },
-      }),
-    ]);
-
-    console.log(`[c2bConfirm] ✅ Wallet ${wallet.id} credited KES ${amount} — receipt: ${TransID}`);
   } catch (err) {
-    console.error("[c2bConfirm] Error processing confirmation:", err);
+    console.error("[c2bConfirm] Error:", err);
   }
 };
 
 /* ============================================================
-   C2B — SIMULATE (sandbox only)
-   POST /api/mpesa/c2b/simulate
-   Auth required. Role: ADMIN or SYSTEM_ADMIN
-   Body: { phone, amount, billRef }
+   C2B SIMULATE — POST /api/mpesa/c2b/simulate  (sandbox, ADMIN)
 ============================================================ */
 export const c2bSimulate = async (req, res) => {
   try {
-    if (process.env.MPESA_ENV === "production") {
-      return res.status(403).json({
-        success: false,
-        message: "Simulation is not available in production.",
-      });
-    }
-
-    const role = req.user?.role?.toUpperCase();
-    if (role !== "ADMIN" && role !== "SYSTEM_ADMIN") {
-      return res.status(403).json({ success: false, message: "ADMIN only." });
-    }
-
+    if (process.env.MPESA_ENV === "production") return res.status(403).json({ success: false, message: "Not available in production." });
+    if (!["ADMIN", "SYSTEM_ADMIN"].includes(req.user?.role?.toUpperCase())) return res.status(403).json({ success: false, message: "ADMIN only." });
     const { phone, amount, billRef } = req.body;
-    if (!phone || !amount) {
-      return res.status(400).json({ success: false, message: "phone and amount are required." });
-    }
-
-    const result = await simulateC2B({
-      phone,
-      amount: Number(amount),
-      billRef: billRef || "TEST",
-    });
-
+    if (!phone || !amount) return res.status(400).json({ success: false, message: "phone and amount required." });
+    const result = await simulateC2B({ phone, amount: Number(amount), billRef: billRef || "TEST" });
     return res.status(200).json({ success: true, data: result });
   } catch (err) {
     console.error("[c2bSimulate]", err?.response?.data ?? err.message);
-    return res.status(502).json({
-      success: false,
-      message: "C2B simulation failed.",
-      detail:  err?.response?.data,
-    });
+    return res.status(502).json({ success: false, message: "Simulation failed.", detail: err?.response?.data });
   }
 };
 
 /* ============================================================
-   B2C WITHDRAW
-   POST /api/mpesa/b2c
-   Auth required. Role: AGENT
-   Body: { phone: string, amount: number }
+   B2C WITHDRAW — POST /api/mpesa/b2c  (AGENT only)
 ============================================================ */
 export const b2cWithdraw = async (req, res) => {
   try {
@@ -476,94 +427,43 @@ export const b2cWithdraw = async (req, res) => {
     const phone  = req.body?.phone?.trim();
     const amount = Number(req.body?.amount);
 
-    if (!phone) {
-      return res.status(400).json({ success: false, message: "Phone number is required." });
-    }
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ success: false, message: "Enter a valid withdrawal amount." });
-    }
-    if (user?.role?.toUpperCase() !== "AGENT") {
-      return res.status(403).json({ success: false, message: "Only AGENT accounts can withdraw." });
-    }
+    if (!phone) return res.status(400).json({ success: false, message: "Phone number is required." });
+    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ success: false, message: "Enter a valid amount." });
+    if (user?.role?.toUpperCase() !== "AGENT") return res.status(403).json({ success: false, message: "AGENT accounts only." });
 
-    const agent = await prisma.agent.findFirst({
-      where:   { userId: user.id },
-      include: { wallet: true },
-    });
-
-    if (!agent) {
-      return res.status(404).json({ success: false, message: "Agent profile not found." });
-    }
+    const agent = await prisma.agent.findFirst({ where: { userId: user.id }, include: { wallet: true } });
+    if (!agent) return res.status(404).json({ success: false, message: "Agent profile not found." });
 
     const agentWallet = agent.wallet;
     if (!agentWallet || agentWallet.balance < amount) {
-      return res.status(402).json({
-        success:         false,
-        message:         "Insufficient agent wallet balance.",
-        currentBalance:  agentWallet?.balance ?? 0,
-        requestedAmount: amount,
-      });
+      return res.status(402).json({ success: false, message: "Insufficient agent wallet balance.", currentBalance: agentWallet?.balance ?? 0, requestedAmount: amount });
     }
 
-    // Optimistic deduction — reverse on Daraja failure
     const [updatedWallet, agentTx] = await prisma.$transaction([
-      prisma.agentWallet.update({
-        where: { id: agentWallet.id },
-        data:  { balance: { decrement: amount } },
-      }),
+      prisma.agentWallet.update({ where: { id: agentWallet.id }, data: { balance: { decrement: amount } } }),
       prisma.agentTransaction.create({
-        data: {
-          walletId:      agentWallet.id,
-          type:          "WITHDRAWAL",
-          amount,
-          description:   `M-Pesa withdrawal to ${normalizePhone(phone)}`,
-          reference:     null,
-          balanceBefore: agentWallet.balance,
-          balanceAfter:  agentWallet.balance - amount,
-        },
+        data: { walletId: agentWallet.id, type: "WITHDRAWAL", amount, description: `M-Pesa withdrawal to ${normalizePhone(phone)}`, reference: null, balanceBefore: agentWallet.balance, balanceAfter: agentWallet.balance - amount },
       }),
     ]);
 
-    // Call Daraja
     let darajaRes;
     try {
-      darajaRes = await initiateB2C({
-        phone,
-        amount,
-        remarks:  "TrackMyKid Agent Withdrawal",
-        occasion: "AgentWithdrawal",
-      });
+      darajaRes = await initiateB2C({ phone, amount, remarks: "TrackMyKid Agent Withdrawal", occasion: "AgentWithdrawal" });
     } catch (darajaErr) {
-      // Reverse deduction
       await prisma.$transaction([
-        prisma.agentWallet.update({
-          where: { id: agentWallet.id },
-          data:  { balance: { increment: amount } },
-        }),
-        prisma.agentTransaction.update({
-          where: { id: agentTx.id },
-          data:  { description: "Withdrawal reversed — Daraja unreachable" },
-        }),
+        prisma.agentWallet.update({ where: { id: agentWallet.id }, data: { balance: { increment: amount } } }),
+        prisma.agentTransaction.update({ where: { id: agentTx.id }, data: { description: "Withdrawal reversed — Daraja unreachable" } }),
       ]);
       console.error("[b2cWithdraw] Daraja error:", darajaErr?.response?.data ?? darajaErr.message);
-      return res.status(502).json({
-        success: false,
-        message: "M-Pesa withdrawal failed. Your balance was not affected.",
-      });
+      return res.status(502).json({ success: false, message: "M-Pesa withdrawal failed. Balance restored." });
     }
 
-    // Save ConversationID for result callback matching
     await prisma.agentTransaction.update({
       where: { id: agentTx.id },
       data:  { reference: darajaRes.ConversationID ?? darajaRes.OriginatorConversationID },
     });
 
-    return res.status(200).json({
-      success:        true,
-      message:        "Withdrawal initiated. Funds will arrive within minutes.",
-      newBalance:     updatedWallet.balance,
-      conversationId: darajaRes.ConversationID,
-    });
+    return res.status(200).json({ success: true, message: "Withdrawal initiated. Funds will arrive shortly.", newBalance: updatedWallet.balance, conversationId: darajaRes.ConversationID });
   } catch (err) {
     console.error("[b2cWithdraw] Unexpected error:", err);
     return res.status(500).json({ success: false, message: "An unexpected error occurred." });
@@ -571,85 +471,44 @@ export const b2cWithdraw = async (req, res) => {
 };
 
 /* ============================================================
-   B2C — RESULT CALLBACK
-   POST /api/mpesa/b2c/callback
-   ⚠️  PUBLIC — Safaricom posts B2C result here.
+   B2C CALLBACKS  (PUBLIC)
 ============================================================ */
 export const b2cCallback = async (req, res) => {
   res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted" });
-
   try {
     const result = req.body?.Result;
     if (!result) return;
-
     const conversationId = result.ConversationID;
     const resultCode     = Number(result.ResultCode);
-
-    const agentTx = await prisma.agentTransaction.findFirst({
-      where: { reference: conversationId },
-    });
-
-    if (!agentTx) {
-      console.warn("[b2cCallback] No matching agent transaction:", conversationId);
-      return;
-    }
+    const agentTx        = await prisma.agentTransaction.findFirst({ where: { reference: conversationId } });
+    if (!agentTx) { console.warn("[b2cCallback] No matching tx:", conversationId); return; }
 
     if (resultCode !== 0) {
-      // Reverse deduction — money didn't leave
       await prisma.$transaction([
-        prisma.agentWallet.update({
-          where: { id: agentTx.walletId },
-          data:  { balance: { increment: agentTx.amount } },
-        }),
-        prisma.agentTransaction.update({
-          where: { id: agentTx.id },
-          data:  { description: `Withdrawal FAILED (code ${resultCode}) — reversed` },
-        }),
+        prisma.agentWallet.update({ where: { id: agentTx.walletId }, data: { balance: { increment: agentTx.amount } } }),
+        prisma.agentTransaction.update({ where: { id: agentTx.id }, data: { description: `Withdrawal FAILED (${resultCode}) — reversed` } }),
       ]);
-      console.log(`[b2cCallback] ❌ B2C failed (${resultCode}) — KES ${agentTx.amount} reversed`);
+      console.log(`[b2cCallback] ❌ B2C failed — KES ${agentTx.amount} reversed`);
       return;
     }
-
-    const params   = result.ResultParameters?.ResultParameter ?? [];
-    const getParam = (key) => params.find((p) => p.Key === key)?.Value ?? null;
-    const receipt  = getParam("TransactionReceipt");
-
-    await prisma.agentTransaction.update({
-      where: { id: agentTx.id },
-      data:  {
-        reference:   receipt ?? conversationId,
-        description: `Withdrawal SUCCESS — ${receipt}`,
-      },
-    });
-
+    const params  = result.ResultParameters?.ResultParameter ?? [];
+    const receipt = params.find((p) => p.Key === "TransactionReceipt")?.Value ?? null;
+    await prisma.agentTransaction.update({ where: { id: agentTx.id }, data: { reference: receipt ?? conversationId, description: `Withdrawal SUCCESS — ${receipt}` } });
     console.log(`[b2cCallback] ✅ B2C success — receipt: ${receipt}`);
-  } catch (err) {
-    console.error("[b2cCallback] Error:", err);
-  }
+  } catch (err) { console.error("[b2cCallback] Error:", err); }
 };
 
-/* ============================================================
-   B2C — TIMEOUT CALLBACK
-   POST /api/mpesa/b2c/timeout
-   ⚠️  PUBLIC
-============================================================ */
 export const b2cTimeout = async (req, res) => {
   res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted" });
-  console.warn("[b2cTimeout] B2C request timed out:", JSON.stringify(req.body));
+  console.warn("[b2cTimeout] B2C timed out:", JSON.stringify(req.body));
 };
 
 /* ============================================================
    PRIVATE HELPERS
 ============================================================ */
-
-/**
- * Extract userId from BillRefNumber.
- * Format we set: "TRK{userId}" e.g. "TRK42"
- * Also handles legacy format "TRK-42"
- */
 function extractUserIdFromRef(ref) {
   if (!ref) return null;
-  const match = String(ref).match(/TRK-?(\d+)/i);
+  const match = String(ref).match(/TRKA?-?(\d+)/i);
   if (!match) return null;
   const id = Number(match[1]);
   return Number.isFinite(id) && id > 0 ? id : null;
