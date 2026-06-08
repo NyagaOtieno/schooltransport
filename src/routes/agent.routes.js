@@ -2,53 +2,72 @@
 import express from "express";
 import { authMiddleware } from "../middleware/auth.js";
 import {
-  bootstrapSystemAdmin,
-  createAgent,
-  listAgents,
-  getAgent,
-  updateAgent,
-  deleteAgent,
+  getWallet,
+  getWalletTransactions,
+  getSchools,
   createSchool,
-  getMySchools,
-  getDashboard,
-  getAgentBalance,
-  topUpAgentWallet,
-  withdrawAgentWallet,
-  getAgentTransactions,
-  getAdminWalletBalance,
-  getAdminWalletTransactions,
+  adminCreditAgentWallet,
+  getProfile,
 } from "../controllers/agent.controller.js";
 
 const router = express.Router();
 
-// ── Public (no JWT needed — protected by SYSTEM_ADMIN_SECRET) ──────
-router.post("/bootstrap-system-admin", bootstrapSystemAdmin);
-
-// ── All routes below require valid JWT ─────────────────────────────
+// Every agent route requires a valid JWT
 router.use(authMiddleware);
 
-// ── Specific named routes BEFORE /:id to avoid conflicts ───────────
-router.post("/create-school",            createSchool);
-router.get("/my-schools",                getMySchools);
-router.get("/dashboard",                 getDashboard);
+/* ============================================================
+   PROFILE
+============================================================ */
+/**
+ * GET /api/agents/profile
+ * Role: AGENT
+ */
+router.get("/profile", getProfile);
 
-// ── Agent wallet (specific paths before /:id) ──────────────────────
-router.get("/wallet/balance",            getAgentBalance);
-router.post("/wallet/topup",             topUpAgentWallet);
-router.post("/wallet/withdraw",          withdrawAgentWallet);
-router.get("/wallet/transactions",       getAgentTransactions);
+/* ============================================================
+   WALLET
+============================================================ */
+/**
+ * GET /api/agents/wallet
+ * Returns balance, lifetime earned, this month earned.
+ * Role: AGENT
+ */
+router.get("/wallet", getWallet);
 
-// ── Admin wallet overview ──────────────────────────────────────────
-router.get("/admin-wallet/balance",      getAdminWalletBalance);
-router.get("/admin-wallet/transactions", getAdminWalletTransactions);
+/**
+ * GET /api/agents/wallet/transactions?page=1&limit=20
+ * Full transaction history including commissions, onboarding fees, withdrawals.
+ * Role: AGENT
+ */
+router.get("/wallet/transactions", getWalletTransactions);
 
-// ── Collection routes ──────────────────────────────────────────────
-router.get("/",    listAgents);   // GET  /api/agents
-router.post("/",   createAgent);  // POST /api/agents
+/**
+ * POST /api/agents/wallet/topup
+ * Admin manually credits an agent wallet.
+ * Role: ADMIN | SYSTEM_ADMIN
+ * Body: { agentId: number, amount: number }
+ */
+router.post("/wallet/topup", adminCreditAgentWallet);
 
-// ── Dynamic :id routes LAST to avoid swallowing named routes ───────
-router.get("/:id",    getAgent);
-router.put("/:id",    updateAgent);
-router.delete("/:id", deleteAgent);
+/* ============================================================
+   SCHOOLS
+============================================================ */
+/**
+ * GET /api/agents/schools
+ * Returns all schools (tenants) onboarded by this agent.
+ * Role: AGENT
+ */
+router.get("/schools", getSchools);
+
+/**
+ * POST /api/agents/create-school
+ * Creates tenant + admin + triggers STK push for onboarding fee.
+ * Role: AGENT
+ * Body: {
+ *   tenantName, county, adminName, adminEmail, adminPassword,
+ *   phone, onboardingFee
+ * }
+ */
+router.post("/create-school", createSchool);
 
 export default router;

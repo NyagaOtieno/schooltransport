@@ -1,487 +1,418 @@
 // src/controllers/agent.controller.js
-import prisma from "../middleware/prisma.js";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+import prisma from "../middleware/prisma.js";
 import {
-  getOrCreateAgentWallet,
+  getAgentByUserId,
+  getAgentWallet,
   creditAgentWallet,
   deductAgentWallet,
-  agentInclude,
-} from "../services/agent.service.js";
+} from "../services/wallet.service.js";
+import {
+  initiateSTKPush,
+  normalizePhone,
+} from "../services/billing/mpesa.service.js";
 
-// ── Helpers ───────────────────────────────────────────────────────
-function isStrongPassword(p) {
-  return p.length >= 8 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /[0-9]/.test(p);
-}
+/* ============================================================
+   PENDING ONBOARDING MAP
+   checkoutRequestId → { agentId, agentWalletId, amount, tenantId }
+   Cleared after callback or timeout.
+============================================================ */
+const pendingOnboarding = new Map();
 
-function signToken(user) {
-  return jwt.sign(
-    { userId: user.id, role: user.role, tenantId: user.tenantId ?? null },
-    process.env.JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-}
-
-function assertSystemAdmin(req, res) {
-  const r = req.user?.role;
-  if (r !== "SYSTEM_ADMIN" && r !== "ADMIN") {
-    res.status(403).json({ error: "Forbidden. System Admin access required." });
-    return false;
-  }
-  return true;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// BOOTSTRAP SYSTEM ADMIN (one-time, protected by env secret)
-// POST /api/agents/bootstrap-system-admin
-// ═══════════════════════════════════════════════════════════════
-export const bootstrapSystemAdmin = async (req, res) => {
+/* ============================================================
+   GET /api/agents/wallet
+   Returns agent wallet balance + lifetime + this month earned.
+   Role: AGENT
+============================================================ */
+export const getWallet = async (req, res) => {
   try {
-    const { name, email, password, secret } = req.body;
-
-    if (!secret || secret !== process.env.SYSTEM_ADMIN_SECRET) {
-      return res.status(403).json({ error: "Invalid system secret." });
-    }
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: "name, email and password are required." });
-    }
-    if (!isStrongPassword(password)) {
-      return res.status(400).json({
-        error: "Password must be 8+ chars with uppercase, lowercase and a digit.",
-      });
+    const agent = await getAgentByUserId(req.user.id);
+    if (!agent) {
+      return res.status(404).json({ success: false, message: "Agent profile not found." });
     }
 
-    const existing = await prisma.user.findFirst({ where: { email, tenantId: null } });
-    if (existing) return res.status(409).json({ error: "System admin already exists." });
+    const wallet = await getAgentWallet(agent.id);
 
-    const hashed = await bcrypt.hash(password, 12);
-    const user = await prisma.user.create({
-      data: { name, email, password: hashed, role: "SYSTEM_ADMIN", tenantId: null },
+    // Lifetime commissions earned
+    const lifetimeResult = await prisma.agentTransaction.aggregate({
+      where:  { wallet: { agentId: agent.id }, type: "COMMISSION" },
+      _sum:   { amount: true },
     });
 
-    return res.status(201).json({
-      success: true,
-      message: "System admin created.",
-      token: signToken(user),
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
-    });
-  } catch (err) {
-    console.error("[bootstrapSystemAdmin]", err);
-    return res.status(500).json({ error: "Failed to create system admin." });
-  }
-};
+    // This month commissions
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
 
-// ═══════════════════════════════════════════════════════════════
-// CREATE AGENT
-// POST /api/agents
-// Auth: SYSTEM_ADMIN or ADMIN
-// ═══════════════════════════════════════════════════════════════
-export const createAgent = async (req, res) => {
-  try {
-    if (!assertSystemAdmin(req, res)) return;
-
-    const { name, email, phone, password, commissionRate = 0.10 } = req.body;
-
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: "name, email and password are required." });
-    }
-    if (!isStrongPassword(password)) {
-      return res.status(400).json({
-        error: "Password must be 8+ chars with uppercase, lowercase and a digit.",
-      });
-    }
-
-    const existing = await prisma.user.findFirst({ where: { email, tenantId: null } });
-    if (existing) return res.status(409).json({ error: "Email already registered." });
-
-    const hashed = await bcrypt.hash(password, 12);
-    const user = await prisma.user.create({
-      data: { name, email, phone: phone ?? null, password: hashed, role: "AGENT", tenantId: null },
-    });
-
-    const agent = await prisma.agent.create({
-      data: { userId: user.id, commissionRate: Number(commissionRate), isActive: true },
-      include: agentInclude,
-    });
-
-    await getOrCreateAgentWallet(agent.id);
-
-    return res.status(201).json({ success: true, message: "Agent created.", data: agent });
-  } catch (err) {
-    console.error("[createAgent]", err);
-    return res.status(500).json({ error: "Failed to create agent." });
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// LIST ALL AGENTS
-// GET /api/agents
-// ═══════════════════════════════════════════════════════════════
-export const listAgents = async (req, res) => {
-  try {
-    if (!assertSystemAdmin(req, res)) return;
-    const agents = await prisma.agent.findMany({ include: agentInclude, orderBy: { createdAt: "desc" } });
-    return res.json({ success: true, data: agents });
-  } catch (err) {
-    console.error("[listAgents]", err);
-    return res.status(500).json({ error: "Failed to list agents." });
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// GET AGENT BY ID
-// GET /api/agents/:id
-// ═══════════════════════════════════════════════════════════════
-export const getAgent = async (req, res) => {
-  try {
-    const agentId = Number(req.params.id);
-    const agent = await prisma.agent.findUnique({ where: { id: agentId }, include: agentInclude });
-    if (!agent) return res.status(404).json({ error: "Agent not found." });
-
-    const isSelf  = agent.userId === req.user?.userId;
-    const isAdmin = req.user?.role === "SYSTEM_ADMIN" || req.user?.role === "ADMIN";
-    if (!isSelf && !isAdmin) return res.status(403).json({ error: "Forbidden." });
-
-    return res.json({ success: true, data: agent });
-  } catch (err) {
-    console.error("[getAgent]", err);
-    return res.status(500).json({ error: "Failed to get agent." });
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// UPDATE AGENT
-// PUT /api/agents/:id
-// ═══════════════════════════════════════════════════════════════
-export const updateAgent = async (req, res) => {
-  try {
-    const agentId = Number(req.params.id);
-    const agent = await prisma.agent.findUnique({ where: { id: agentId } });
-    if (!agent) return res.status(404).json({ error: "Agent not found." });
-
-    const isSelf  = agent.userId === req.user?.userId;
-    const isAdmin = req.user?.role === "SYSTEM_ADMIN" || req.user?.role === "ADMIN";
-    if (!isSelf && !isAdmin) return res.status(403).json({ error: "Forbidden." });
-
-    const { commissionRate, isActive, name, phone } = req.body;
-    if (name || phone) {
-      await prisma.user.update({ where: { id: agent.userId }, data: { ...(name && { name }), ...(phone && { phone }) } });
-    }
-
-    const updated = await prisma.agent.update({
-      where: { id: agentId },
-      data: {
-        ...(commissionRate !== undefined && { commissionRate: Number(commissionRate) }),
-        ...(isActive !== undefined && { isActive: Boolean(isActive) }),
+    const monthResult = await prisma.agentTransaction.aggregate({
+      where: {
+        wallet:    { agentId: agent.id },
+        type:      "COMMISSION",
+        createdAt: { gte: startOfMonth },
       },
-      include: agentInclude,
+      _sum: { amount: true },
     });
 
-    return res.json({ success: true, data: updated });
+    return res.status(200).json({
+      success: true,
+      data: {
+        balance:         wallet.balance ?? 0,
+        currency:        "KES",
+        lifetimeEarned:  lifetimeResult._sum.amount ?? 0,
+        thisMonthEarned: monthResult._sum.amount ?? 0,
+      },
+    });
   } catch (err) {
-    console.error("[updateAgent]", err);
-    return res.status(500).json({ error: "Failed to update agent." });
+    console.error("[agent.getWallet]", err);
+    return res.status(500).json({ success: false, message: "Failed to fetch wallet." });
   }
 };
 
-// ═══════════════════════════════════════════════════════════════
-// DELETE AGENT
-// DELETE /api/agents/:id
-// ═══════════════════════════════════════════════════════════════
-export const deleteAgent = async (req, res) => {
+/* ============================================================
+   GET /api/agents/wallet/transactions?page=1&limit=20
+   Role: AGENT
+============================================================ */
+export const getWalletTransactions = async (req, res) => {
   try {
-    if (!assertSystemAdmin(req, res)) return;
-    const agentId = Number(req.params.id);
-    const agent = await prisma.agent.findUnique({ where: { id: agentId } });
-    if (!agent) return res.status(404).json({ error: "Agent not found." });
+    const agent = await getAgentByUserId(req.user.id);
+    if (!agent) {
+      return res.status(404).json({ success: false, message: "Agent profile not found." });
+    }
 
-    await prisma.user.delete({ where: { id: agent.userId } });
-    return res.json({ success: true, message: "Agent deleted." });
+    const wallet = await getAgentWallet(agent.id);
+    if (!wallet.id) {
+      return res.status(200).json({ success: true, data: [], total: 0, page: 1, limit: 20 });
+    }
+
+    const page  = Math.max(1, Number(req.query.page)  || 1);
+    const limit = Math.min(50, Number(req.query.limit) || 20);
+
+    const [txs, total] = await Promise.all([
+      prisma.agentTransaction.findMany({
+        where:   { walletId: wallet.id },
+        orderBy: { createdAt: "desc" },
+        skip:    (page - 1) * limit,
+        take:    limit,
+      }),
+      prisma.agentTransaction.count({ where: { walletId: wallet.id } }),
+    ]);
+
+    return res.status(200).json({ success: true, data: txs, total, page, limit });
   } catch (err) {
-    console.error("[deleteAgent]", err);
-    return res.status(500).json({ error: "Failed to delete agent." });
+    console.error("[agent.getWalletTransactions]", err);
+    return res.status(500).json({ success: false, message: "Failed to fetch transactions." });
   }
 };
 
-// ═══════════════════════════════════════════════════════════════
-// AGENT CREATES A SCHOOL (Tenant + Admin User)
-// POST /api/agents/create-school
-// ═══════════════════════════════════════════════════════════════
+/* ============================================================
+   GET /api/agents/schools
+   Returns all tenants onboarded by this agent.
+   Role: AGENT
+============================================================ */
+export const getSchools = async (req, res) => {
+  try {
+    const agent = await getAgentByUserId(req.user.id);
+    if (!agent) {
+      return res.status(404).json({ success: false, message: "Agent profile not found." });
+    }
+
+    const agentTenants = await prisma.agentTenant.findMany({
+      where:   { agentId: agent.id },
+      include: {
+        tenant: {
+          include: {
+            _count: { select: { students: true, buses: true, users: true } },
+          },
+        },
+      },
+      orderBy: { onboardedAt: "desc" },
+    });
+
+    const schools = agentTenants.map((at) => ({
+      id:          at.tenant.id,
+      name:        at.tenant.name,
+      county:      at.tenant.address ?? "",
+      logoUrl:     at.tenant.logoUrl  ?? null,
+      phone:       at.tenant.phone    ?? "",
+      students:    at.tenant._count.students,
+      buses:       at.tenant._count.buses,
+      staff:       at.tenant._count.users,
+      onboardedAt: at.onboardedAt,
+      mode:        at.tenant.mode,
+    }));
+
+    return res.status(200).json({ success: true, data: schools });
+  } catch (err) {
+    console.error("[agent.getSchools]", err);
+    return res.status(500).json({ success: false, message: "Failed to fetch schools." });
+  }
+};
+
+/* ============================================================
+   POST /api/agents/create-school
+   Creates a new Tenant + Admin user + AgentTenant link.
+   Then triggers STK Push for the onboarding fee.
+   Onboarding fee is logged in AgentTransaction (NOT credited to wallet).
+   Role: AGENT
+
+   Body: {
+     tenantName, county, adminName, adminEmail, adminPassword,
+     phone,          // M-Pesa phone for STK push
+     onboardingFee   // amount to pay
+   }
+============================================================ */
 export const createSchool = async (req, res) => {
   try {
-    const userId = req.user?.userId;
-    const role   = req.user?.role;
+    const {
+      tenantName,
+      county,
+      adminName,
+      adminEmail,
+      adminPassword,
+      phone,
+      onboardingFee,
+    } = req.body;
 
-    if (!["AGENT", "SYSTEM_ADMIN", "ADMIN"].includes(role)) {
-      return res.status(403).json({ error: "Only agents or admins can create schools." });
+    // ── Validate required fields ───────────────────────────
+    if (!tenantName?.trim()) {
+      return res.status(400).json({ success: false, message: "School name is required." });
+    }
+    if (!county?.trim()) {
+      return res.status(400).json({ success: false, message: "County is required." });
+    }
+    if (!adminName?.trim() || !adminEmail?.trim() || !adminPassword?.trim()) {
+      return res.status(400).json({ success: false, message: "Admin name, email and password are required." });
+    }
+    if (!phone?.trim()) {
+      return res.status(400).json({ success: false, message: "M-Pesa phone number is required." });
     }
 
-    const { tenantName, mode = "KID", adminName, adminEmail, adminPassword, adminPhone } = req.body;
-
-    if (!tenantName || !adminName || !adminEmail || !adminPassword) {
-      return res.status(400).json({ error: "tenantName, adminName, adminEmail and adminPassword are required." });
-    }
-    if (!isStrongPassword(adminPassword)) {
-      return res.status(400).json({ error: "Admin password must be 8+ chars with uppercase, lowercase and digit." });
+    const fee = Number(onboardingFee);
+    if (!Number.isFinite(fee) || fee < 1) {
+      return res.status(400).json({ success: false, message: "A valid onboarding fee is required." });
     }
 
-    const hashed = await bcrypt.hash(adminPassword, 12);
+    // ── Resolve agent ──────────────────────────────────────
+    const agent = await getAgentByUserId(req.user.id);
+    if (!agent) {
+      return res.status(403).json({ success: false, message: "Agent profile not found." });
+    }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const tenant = await tx.tenant.create({ data: { name: tenantName, mode: mode.toUpperCase() } });
+    // ── Check for duplicate admin email ────────────────────
+    const existingEmail = await prisma.user.findFirst({
+      where: { email: adminEmail.trim().toLowerCase() },
+    });
+    if (existingEmail) {
+      return res.status(409).json({ success: false, message: "A user with this email already exists." });
+    }
 
-      const adminUser = await tx.user.create({
-        data: { name: adminName, email: adminEmail, phone: adminPhone ?? null, password: hashed, role: "ADMIN", tenantId: tenant.id },
+    // ── Create Tenant + Admin user in one transaction ──────
+    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+
+    const tenant = await prisma.$transaction(async (tx) => {
+      // 1. Create tenant
+      const newTenant = await tx.tenant.create({
+        data: {
+          name:    tenantName.trim(),
+          address: county.trim(),
+          mode:    "KID",
+        },
       });
 
-      if (role === "AGENT") {
-        const agent = await tx.agent.findUnique({ where: { userId } });
-        if (agent) await tx.agentTenant.create({ data: { agentId: agent.id, tenantId: tenant.id } });
-      }
+      // 2. Create admin user for this tenant
+      await tx.user.create({
+        data: {
+          name:     adminName.trim(),
+          email:    adminEmail.trim().toLowerCase(),
+          password: hashedPassword,
+          role:     "ADMIN",
+          tenantId: newTenant.id,
+        },
+      });
 
-      return { tenant, adminUser };
+      // 3. Link agent to tenant
+      await tx.agentTenant.create({
+        data: { agentId: agent.id, tenantId: newTenant.id },
+      });
+
+      return newTenant;
     });
+
+    // ── Get or create agent wallet for transaction logging ──
+    let agentWallet = agent.wallet;
+    if (!agentWallet) {
+      agentWallet = await prisma.agentWallet.create({
+        data: { agentId: agent.id, balance: 0 },
+      });
+    }
+
+    // ── Trigger STK Push for onboarding fee ────────────────
+    let checkoutRequestId = null;
+
+    try {
+      const darajaRes = await initiateSTKPush({
+        phone,
+        amount:      fee,
+        accountRef:  `OB-${tenant.id}`,
+        description: "School Onboarding",
+      });
+
+      if (darajaRes.ResponseCode === "0") {
+        checkoutRequestId = darajaRes.CheckoutRequestID;
+
+        // Store context for callback — onboarding fees don't credit wallet
+        pendingOnboarding.set(checkoutRequestId, {
+          agentId:       agent.id,
+          agentWalletId: agentWallet.id,
+          tenantId:      tenant.id,
+          amount:        fee,
+        });
+      }
+    } catch (darajaErr) {
+      // STK push failed — school still created, just log fee as PENDING manually
+      console.error("[createSchool] STK push error:", darajaErr?.response?.data ?? darajaErr.message);
+
+      await prisma.agentTransaction.create({
+        data: {
+          walletId:      agentWallet.id,
+          type:          "SCHOOL_ONBOARDING_FEE",
+          amount:        fee,
+          description:   `Onboarding fee for ${tenantName} — payment failed`,
+          reference:     `OB-${tenant.id}`,
+          balanceBefore: agentWallet.balance,
+          balanceAfter:  agentWallet.balance,  // balance unchanged
+        },
+      });
+    }
 
     return res.status(201).json({
       success: true,
-      message: `School "${result.tenant.name}" created.`,
+      message: checkoutRequestId
+        ? "School created. Enter your M-Pesa PIN to complete payment."
+        : "School created. Payment could not be initiated — please retry.",
       data: {
-        tenant: { id: result.tenant.id, name: result.tenant.name, mode: result.tenant.mode },
-        admin:  { id: result.adminUser.id, name: result.adminUser.name, email: result.adminUser.email },
+        tenantId:   tenant.id,
+        tenantName: tenant.name,
+        county:     tenant.address,
+      },
+      checkoutRequestId,  // frontend polls this for payment status
+    });
+  } catch (err) {
+    console.error("[agent.createSchool]", err);
+    return res.status(500).json({ success: false, message: "Failed to create school." });
+  }
+};
+
+/* ============================================================
+   POST /api/mpesa/onboarding-callback  (called internally)
+   Handle STK callback for onboarding fee.
+   Does NOT credit AgentWallet — only logs AgentTransaction.
+============================================================ */
+export const handleOnboardingCallback = async (checkoutRequestId, resultCode, paidAmount, receipt) => {
+  const ctx = pendingOnboarding.get(checkoutRequestId);
+  if (!ctx) return;
+
+  pendingOnboarding.delete(checkoutRequestId);
+
+  const balanceBefore = (await prisma.agentWallet.findUnique({
+    where: { id: ctx.agentWalletId }, select: { balance: true },
+  }))?.balance ?? 0;
+
+  await prisma.agentTransaction.create({
+    data: {
+      walletId:      ctx.agentWalletId,
+      type:          "SCHOOL_ONBOARDING_FEE",
+      amount:        paidAmount,
+      description:   resultCode === 0
+        ? `Onboarding fee — school ${ctx.tenantId} — receipt: ${receipt}`
+        : `Onboarding fee FAILED (code ${resultCode}) — school ${ctx.tenantId}`,
+      reference:     receipt ?? checkoutRequestId,
+      balanceBefore,
+      balanceAfter:  balanceBefore,  // ← balance does NOT change
+    },
+  });
+
+  console.log(`[onboarding] ${resultCode === 0 ? "✅" : "❌"} Fee ${paidAmount} logged for school ${ctx.tenantId}`);
+};
+
+/* expose map for mpesa controller to check */
+export { pendingOnboarding };
+
+/* ============================================================
+   POST /api/agents/wallet/topup  (manual admin credit)
+   Role: ADMIN | SYSTEM_ADMIN
+   Body: { agentId, amount }
+============================================================ */
+export const adminCreditAgentWallet = async (req, res) => {
+  try {
+    const role = req.user?.role?.toUpperCase();
+    if (!["ADMIN", "SYSTEM_ADMIN"].includes(role)) {
+      return res.status(403).json({ success: false, message: "ADMIN only." });
+    }
+
+    const agentId = Number(req.body?.agentId);
+    const amount  = Number(req.body?.amount);
+
+    if (!Number.isFinite(agentId) || agentId <= 0) {
+      return res.status(400).json({ success: false, message: "Valid agentId is required." });
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, message: "Valid amount is required." });
+    }
+
+    const wallet = await creditAgentWallet({
+      agentId,
+      amount,
+      type:        "TOPUP",
+      description: `Manual credit by admin ${req.user.id}`,
+      reference:   `admin-credit-${Date.now()}`,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `KES ${amount} credited to agent wallet.`,
+      balance: wallet.balance,
+    });
+  } catch (err) {
+    console.error("[agent.adminCreditAgentWallet]", err);
+    return res.status(500).json({ success: false, message: "Failed to credit wallet." });
+  }
+};
+
+/* ============================================================
+   GET /api/agents/profile
+   Role: AGENT
+============================================================ */
+export const getProfile = async (req, res) => {
+  try {
+    const agent = await prisma.agent.findFirst({
+      where:   { userId: req.user.id },
+      include: {
+        user:    { select: { id: true, name: true, email: true, phone: true } },
+        wallet:  { select: { balance: true } },
+        tenants: { include: { tenant: { select: { id: true, name: true } } } },
+      },
+    });
+
+    if (!agent) {
+      return res.status(404).json({ success: false, message: "Agent profile not found." });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        id:             agent.id,
+        name:           agent.user?.name,
+        email:          agent.user?.email,
+        phone:          agent.user?.phone,
+        commissionRate: agent.commissionRate,
+        isActive:       agent.isActive,
+        walletBalance:  agent.wallet?.balance ?? 0,
+        schoolCount:    agent.tenants.length,
       },
     });
   } catch (err) {
-    console.error("[createSchool]", err);
-    return res.status(500).json({ error: "Failed to create school." });
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// GET AGENT'S SCHOOLS
-// GET /api/agents/my-schools
-// ═══════════════════════════════════════════════════════════════
-export const getMySchools = async (req, res) => {
-  try {
-    const userId = req.user?.userId;
-    const role   = req.user?.role;
-
-    let agentTenants;
-
-    if (role === "AGENT") {
-      const agent = await prisma.agent.findUnique({ where: { userId } });
-      if (!agent) return res.status(404).json({ error: "Agent profile not found." });
-      agentTenants = await prisma.agentTenant.findMany({
-        where:   { agentId: agent.id },
-        include: { tenant: { include: { _count: { select: { students: true, users: true, buses: true } } } } },
-        orderBy: { onboardedAt: "desc" },
-      });
-    } else if (role === "SYSTEM_ADMIN" || role === "ADMIN") {
-      agentTenants = await prisma.agentTenant.findMany({
-        include: {
-          tenant: { include: { _count: { select: { students: true, users: true, buses: true } } } },
-          agent:  { include: { user: { select: { name: true, email: true } } } },
-        },
-        orderBy: { onboardedAt: "desc" },
-      });
-    } else {
-      return res.status(403).json({ error: "Forbidden." });
-    }
-
-    return res.json({ success: true, data: agentTenants });
-  } catch (err) {
-    console.error("[getMySchools]", err);
-    return res.status(500).json({ error: "Failed to get schools." });
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// AGENT DASHBOARD
-// GET /api/agents/dashboard
-// ═══════════════════════════════════════════════════════════════
-export const getDashboard = async (req, res) => {
-  try {
-    const userId = req.user?.userId;
-    const role   = req.user?.role;
-    if (!["AGENT", "SYSTEM_ADMIN", "ADMIN"].includes(role)) return res.status(403).json({ error: "Forbidden." });
-
-    const agent = await prisma.agent.findUnique({
-      where:   { userId },
-      include: { wallet: true, tenants: { include: { tenant: { include: { _count: { select: { students: true } } } } } } },
-    });
-    if (!agent) return res.status(404).json({ error: "Agent not found." });
-
-    const wallet  = agent.wallet ?? { balance: 0, id: null };
-    const schools = agent.tenants.length;
-    const students = agent.tenants.reduce((s, at) => s + (at.tenant._count?.students ?? 0), 0);
-
-    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    let thisMonthCommission = 0;
-    let lifetimeCommission  = 0;
-
-    if (wallet.id) {
-      const monthTxs = await prisma.agentTransaction.findMany({
-        where: { walletId: wallet.id, type: "COMMISSION", createdAt: { gte: startOfMonth } },
-      });
-      thisMonthCommission = monthTxs.reduce((s, t) => s + t.amount, 0);
-
-      const allTxs = await prisma.agentTransaction.findMany({ where: { walletId: wallet.id, type: "COMMISSION" } });
-      lifetimeCommission = allTxs.reduce((s, t) => s + t.amount, 0);
-    }
-
-    return res.json({
-      success: true,
-      data: { balance: wallet.balance, schools, students, thisMonthCommission, lifetimeCommission, commissionRate: agent.commissionRate },
-    });
-  } catch (err) {
-    console.error("[getDashboard]", err);
-    return res.status(500).json({ error: "Failed to get dashboard." });
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// AGENT WALLET — BALANCE
-// GET /api/agents/wallet/balance
-// ═══════════════════════════════════════════════════════════════
-export const getAgentBalance = async (req, res) => {
-  try {
-    const agent = await prisma.agent.findUnique({ where: { userId: req.user?.userId } });
-    if (!agent) return res.status(404).json({ error: "Agent not found." });
-    const wallet = await getOrCreateAgentWallet(agent.id);
-    return res.json({ success: true, data: { balance: wallet.balance, currency: "KES" } });
-  } catch (err) {
-    console.error("[getAgentBalance]", err);
-    return res.status(500).json({ error: "Failed to get balance." });
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// TOP UP AGENT WALLET (SYSTEM_ADMIN only)
-// POST /api/agents/wallet/topup
-// ═══════════════════════════════════════════════════════════════
-export const topUpAgentWallet = async (req, res) => {
-  try {
-    if (!assertSystemAdmin(req, res)) return;
-    const { agentId, amount, description = "Manual top-up by system admin" } = req.body;
-    if (!agentId || !amount) return res.status(400).json({ error: "agentId and amount required." });
-
-    const agent = await prisma.agent.findUnique({ where: { id: Number(agentId) } });
-    if (!agent) return res.status(404).json({ error: "Agent not found." });
-
-    const wallet = await creditAgentWallet(agent.id, Number(amount), description);
-    return res.json({ success: true, data: { balance: wallet.balance } });
-  } catch (err) {
-    console.error("[topUpAgentWallet]", err);
-    return res.status(500).json({ error: "Failed to top up." });
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// AGENT WITHDRAWAL REQUEST
-// POST /api/agents/wallet/withdraw
-// ═══════════════════════════════════════════════════════════════
-export const withdrawAgentWallet = async (req, res) => {
-  try {
-    if (req.user?.role !== "AGENT") return res.status(403).json({ error: "Forbidden." });
-    const agent = await prisma.agent.findUnique({ where: { userId: req.user?.userId } });
-    if (!agent) return res.status(404).json({ error: "Agent not found." });
-
-    const { amount } = req.body;
-    if (!amount || Number(amount) <= 0) return res.status(400).json({ error: "Valid amount required." });
-
-    const wallet = await deductAgentWallet(agent.id, Number(amount), "WITHDRAWAL", `Withdrawal by agent ${agent.id}`);
-    return res.json({ success: true, message: "Withdrawal recorded. Processing within 24 hours.", data: { balance: wallet.balance } });
-  } catch (err) {
-    if (err.code === "INSUFFICIENT_BALANCE") return res.status(402).json({ error: err.message, code: err.code });
-    console.error("[withdrawAgentWallet]", err);
-    return res.status(500).json({ error: "Withdrawal failed." });
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// AGENT TRANSACTION HISTORY
-// GET /api/agents/wallet/transactions
-// ═══════════════════════════════════════════════════════════════
-export const getAgentTransactions = async (req, res) => {
-  try {
-    const userId = req.user?.userId;
-    const role   = req.user?.role;
-
-    let agent;
-    if (role === "AGENT") {
-      agent = await prisma.agent.findUnique({ where: { userId } });
-    } else if (role === "SYSTEM_ADMIN" || role === "ADMIN") {
-      const id = req.query.agentId;
-      if (!id) return res.status(400).json({ error: "agentId query param required." });
-      agent = await prisma.agent.findUnique({ where: { id: Number(id) } });
-    } else {
-      return res.status(403).json({ error: "Forbidden." });
-    }
-
-    if (!agent) return res.status(404).json({ error: "Agent not found." });
-
-    const wallet = await getOrCreateAgentWallet(agent.id);
-    const page   = Math.max(1, Number(req.query.page)  || 1);
-    const limit  = Math.min(50, Number(req.query.limit) || 20);
-
-    const txs = await prisma.agentTransaction.findMany({
-      where:   { walletId: wallet.id },
-      orderBy: { createdAt: "desc" },
-      skip:    (page - 1) * limit,
-      take:    limit,
-    });
-
-    return res.json({ success: true, data: txs, page, limit });
-  } catch (err) {
-    console.error("[getAgentTransactions]", err);
-    return res.status(500).json({ error: "Failed to fetch transactions." });
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// ADMIN WALLET — aggregate view of all parent wallets in tenant
-// GET /api/agents/admin-wallet/balance
-// ═══════════════════════════════════════════════════════════════
-export const getAdminWalletBalance = async (req, res) => {
-  try {
-    if (req.user?.role !== "ADMIN") return res.status(403).json({ error: "Forbidden." });
-    const tenantId = req.user?.tenantId;
-
-    const parents = await prisma.parent.findMany({ where: { tenantId }, include: { wallet: true } });
-    const totalBalance  = parents.reduce((s, p) => s + (p.wallet?.balance ?? 0), 0);
-    const activeWallets = parents.filter(p => (p.wallet?.balance ?? 0) > 0).length;
-
-    return res.json({
-      success: true,
-      data: { totalSubscribedBalance: totalBalance, activeWallets, totalParents: parents.length, currency: "KES" },
-    });
-  } catch (err) {
-    console.error("[getAdminWalletBalance]", err);
-    return res.status(500).json({ error: "Failed to get admin wallet data." });
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// ADMIN WALLET — all parent transactions in tenant
-// GET /api/agents/admin-wallet/transactions
-// ═══════════════════════════════════════════════════════════════
-export const getAdminWalletTransactions = async (req, res) => {
-  try {
-    if (req.user?.role !== "ADMIN") return res.status(403).json({ error: "Forbidden." });
-    const tenantId = req.user?.tenantId;
-    const page  = Math.max(1, Number(req.query.page)  || 1);
-    const limit = Math.min(100, Number(req.query.limit) || 30);
-
-    const txs = await prisma.transaction.findMany({
-      where:   { parent: { tenantId } },
-      include: { parent: { include: { user: { select: { name: true, email: true } } } } },
-      orderBy: { createdAt: "desc" },
-      skip:    (page - 1) * limit,
-      take:    limit,
-    });
-
-    return res.json({ success: true, data: txs, page, limit });
-  } catch (err) {
-    console.error("[getAdminWalletTransactions]", err);
-    return res.status(500).json({ error: "Failed to get transactions." });
+    console.error("[agent.getProfile]", err);
+    return res.status(500).json({ success: false, message: "Failed to fetch profile." });
   }
 };
