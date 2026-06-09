@@ -103,7 +103,7 @@ export const initiateSTKPush = async ({
       PartyA:            normalizePhone(phone),
       PartyB:            SHORTCODE,
       PhoneNumber:       normalizePhone(phone),
-      CallBackURL:       `${CALLBACK_BASE}/api/mpesa/stk-callback`,
+      CallBackURL:       `${CALLBACK_BASE}/stk-callback`,
       AccountReference:  String(accountRef).slice(0, 12),  // max 12 chars
       TransactionDesc:   String(description).slice(0, 13), // max 13 chars
     },
@@ -154,8 +154,8 @@ export const registerC2BUrls = async (responseType = "Completed") => {
     {
       ShortCode:       C2B_SHORTCODE,
       ResponseType:    responseType,
-     ConfirmationURL: `${CALLBACK_BASE}/api/mpesa/c2b/confirmation`,
-     ValidationURL: `${CALLBACK_BASE}/api/mpesa/c2b/validation`
+     ConfirmationURL: `${CALLBACK_BASE}c2b/confirmation`,
+     ValidationURL: `${CALLBACK_BASE}/c2b/validation`
     },
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -208,8 +208,8 @@ export const initiateB2C = async ({
       PartyA:             B2C_SHORTCODE,
       PartyB:             normalizePhone(phone),
       Remarks:            remarks,
-      QueueTimeOutURL:    `${CALLBACK_BASE}/mpesa/b2c/timeout`,
-      ResultURL:          `${CALLBACK_BASE}/mpesa/b2c/callback`,
+      QueueTimeOutURL:    `${CALLBACK_BASE}/b2c/timeout`,
+      ResultURL:          `${CALLBACK_BASE}/b2c/callback`,
       Occasion:           occasion,
     },
     { headers: { Authorization: `Bearer ${token}` } }
