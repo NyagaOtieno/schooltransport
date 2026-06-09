@@ -67,14 +67,14 @@ router.post("/c2b/register", authMiddleware, c2bRegister);
  * Return { ResultCode: 0 } to accept, non-zero to reject.
  * Only called if ResponseType = "Cancelled" during registration.
  */
-router.post("/c2b/validation", c2bValidate);
+router.post("/c2b-validation", c2bValidate);
 
 /**
  * POST /api/mpesa/c2b/confirm
  * ⚠️  PUBLIC — Safaricom calls this AFTER a C2B payment succeeds.
  * Credits the correct wallet based on BillRefNumber (TRK{userId}).
  */
-router.post("/c2b/confirmation", c2bConfirm);
+router.post("/c2b-confirmation", c2bConfirm);
 
 /**
  * POST /api/mpesa/c2b/simulate

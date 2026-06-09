@@ -154,8 +154,8 @@ export const registerC2BUrls = async (responseType = "Completed") => {
     {
       ShortCode:       C2B_SHORTCODE,
       ResponseType:    responseType,
-     ConfirmationURL: `${CALLBACK_BASE}c2b/confirmation`,
-     ValidationURL: `${CALLBACK_BASE}/c2b/validation`
+     ConfirmationURL: `${CALLBACK_BASE}/c2b-confirmation`,
+     ValidationURL: `${CALLBACK_BASE}/c2b-validation`,
     },
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -172,7 +172,7 @@ export const simulateC2B = async ({ phone, amount, billRef = "TEST" }) => {
   const token = await getAccessToken();
 
   const { data } = await axios.post(
-    `${BASE_URL}/mpesa/c2b/v1/simulate`,
+    `${BASE_URL}mpesa/c2b/v1/simulate`,
     {
       ShortCode:     C2B_SHORTCODE,
       CommandID:     "CustomerPayBillOnline",
