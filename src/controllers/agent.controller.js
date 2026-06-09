@@ -5,23 +5,14 @@ import {
   getAgentByUserId,
   getAgentWallet,
   creditAgentWallet,
-  deductAgentWallet,
 } from "../services/wallet.service.js";
-import {
-  initiateSTKPush,
-  normalizePhone,
-} from "../services/billing/mpesa.service.js";
+import { initiateSTKPush } from "../services/billing/mpesa.service.js";
 
-/* ============================================================
-   PENDING ONBOARDING MAP
-   checkoutRequestId → { agentId, agentWalletId, amount, tenantId }
-   Cleared after callback or timeout.
-============================================================ */
-const pendingOnboarding = new Map();
+// Shared state — no circular import
+import { pendingOnboarding } from "../state/billing.state.js";
 
 /* ============================================================
    GET /api/agents/wallet
-   Returns agent wallet balance + lifetime + this month earned.
    Role: AGENT
 ============================================================ */
 export const getWallet = async (req, res) => {
@@ -33,25 +24,20 @@ export const getWallet = async (req, res) => {
 
     const wallet = await getAgentWallet(agent.id);
 
-    // Lifetime commissions earned
-    const lifetimeResult = await prisma.agentTransaction.aggregate({
-      where:  { wallet: { agentId: agent.id }, type: "COMMISSION" },
-      _sum:   { amount: true },
-    });
-
-    // This month commissions
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-
-    const monthResult = await prisma.agentTransaction.aggregate({
-      where: {
-        wallet:    { agentId: agent.id },
-        type:      "COMMISSION",
-        createdAt: { gte: startOfMonth },
-      },
-      _sum: { amount: true },
-    });
+    const [lifetimeResult, monthResult] = await Promise.all([
+      prisma.agentTransaction.aggregate({
+        where: { wallet: { agentId: agent.id }, type: "COMMISSION" },
+        _sum:  { amount: true },
+      }),
+      prisma.agentTransaction.aggregate({
+        where: {
+          wallet:    { agentId: agent.id },
+          type:      "COMMISSION",
+          createdAt: { gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
+        },
+        _sum: { amount: true },
+      }),
+    ]);
 
     return res.status(200).json({
       success: true,
@@ -59,7 +45,7 @@ export const getWallet = async (req, res) => {
         balance:         wallet.balance ?? 0,
         currency:        "KES",
         lifetimeEarned:  lifetimeResult._sum.amount ?? 0,
-        thisMonthEarned: monthResult._sum.amount ?? 0,
+        thisMonthEarned: monthResult._sum.amount    ?? 0,
       },
     });
   } catch (err) {
@@ -106,7 +92,6 @@ export const getWalletTransactions = async (req, res) => {
 
 /* ============================================================
    GET /api/agents/schools
-   Returns all tenants onboarded by this agent.
    Role: AGENT
 ============================================================ */
 export const getSchools = async (req, res) => {
@@ -150,15 +135,14 @@ export const getSchools = async (req, res) => {
 
 /* ============================================================
    POST /api/agents/create-school
-   Creates a new Tenant + Admin user + AgentTenant link.
-   Then triggers STK Push for the onboarding fee.
-   Onboarding fee is logged in AgentTransaction (NOT credited to wallet).
+   Creates Tenant + Admin user + AgentTenant link.
+   Then triggers STK push for onboarding fee (non-fatal if it fails).
+   Fee is logged in AgentTransaction only — wallet balance unchanged.
    Role: AGENT
 
    Body: {
      tenantName, county, adminName, adminEmail, adminPassword,
-     phone,          // M-Pesa phone for STK push
-     onboardingFee   // amount to pay
+     phone, onboardingFee
    }
 ============================================================ */
 export const createSchool = async (req, res) => {
@@ -173,18 +157,20 @@ export const createSchool = async (req, res) => {
       onboardingFee,
     } = req.body;
 
-    // ── Validate required fields ───────────────────────────
-    if (!tenantName?.trim()) {
-      return res.status(400).json({ success: false, message: "School name is required." });
-    }
-    if (!county?.trim()) {
-      return res.status(400).json({ success: false, message: "County is required." });
-    }
-    if (!adminName?.trim() || !adminEmail?.trim() || !adminPassword?.trim()) {
-      return res.status(400).json({ success: false, message: "Admin name, email and password are required." });
-    }
-    if (!phone?.trim()) {
-      return res.status(400).json({ success: false, message: "M-Pesa phone number is required." });
+    // ── Validate required fields ─────────────────────────
+    const missing = [];
+    if (!tenantName?.trim())    missing.push("tenantName");
+    if (!county?.trim())        missing.push("county");
+    if (!adminName?.trim())     missing.push("adminName");
+    if (!adminEmail?.trim())    missing.push("adminEmail");
+    if (!adminPassword?.trim()) missing.push("adminPassword");
+    if (!phone?.trim())         missing.push("phone");
+
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Missing required fields: ${missing.join(", ")}`,
+      });
     }
 
     const fee = Number(onboardingFee);
@@ -192,25 +178,34 @@ export const createSchool = async (req, res) => {
       return res.status(400).json({ success: false, message: "A valid onboarding fee is required." });
     }
 
-    // ── Resolve agent ──────────────────────────────────────
+    // ── Validate email format ─────────────────────────────
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(adminEmail.trim())) {
+      return res.status(400).json({ success: false, message: "Invalid admin email address." });
+    }
+
+    // ── Resolve agent ─────────────────────────────────────
     const agent = await getAgentByUserId(req.user.id);
     if (!agent) {
       return res.status(403).json({ success: false, message: "Agent profile not found." });
     }
 
-    // ── Check for duplicate admin email ────────────────────
-    const existingEmail = await prisma.user.findFirst({
-      where: { email: adminEmail.trim().toLowerCase() },
+    // ── Check for duplicate admin email ──────────────────
+    const normalizedEmail = adminEmail.trim().toLowerCase();
+    const existingUser = await prisma.user.findFirst({
+      where: { email: normalizedEmail },
     });
-    if (existingEmail) {
-      return res.status(409).json({ success: false, message: "A user with this email already exists." });
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "A user with this email already exists. Use a different admin email.",
+      });
     }
 
-    // ── Create Tenant + Admin user in one transaction ──────
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+    // ── Create Tenant + Admin + AgentTenant atomically ───
+    const hashedPassword = await bcrypt.hash(adminPassword.trim(), 10);
 
     const tenant = await prisma.$transaction(async (tx) => {
-      // 1. Create tenant
       const newTenant = await tx.tenant.create({
         data: {
           name:    tenantName.trim(),
@@ -219,18 +214,16 @@ export const createSchool = async (req, res) => {
         },
       });
 
-      // 2. Create admin user for this tenant
       await tx.user.create({
         data: {
           name:     adminName.trim(),
-          email:    adminEmail.trim().toLowerCase(),
+          email:    normalizedEmail,
           password: hashedPassword,
           role:     "ADMIN",
           tenantId: newTenant.id,
         },
       });
 
-      // 3. Link agent to tenant
       await tx.agentTenant.create({
         data: { agentId: agent.id, tenantId: newTenant.id },
       });
@@ -238,7 +231,7 @@ export const createSchool = async (req, res) => {
       return newTenant;
     });
 
-    // ── Get or create agent wallet for transaction logging ──
+    // ── Get or create AgentWallet for fee logging ─────────
     let agentWallet = agent.wallet;
     if (!agentWallet) {
       agentWallet = await prisma.agentWallet.create({
@@ -246,41 +239,54 @@ export const createSchool = async (req, res) => {
       });
     }
 
-    // ── Trigger STK Push for onboarding fee ────────────────
+    // ── Trigger STK Push (non-fatal) ──────────────────────
     let checkoutRequestId = null;
 
     try {
       const darajaRes = await initiateSTKPush({
-        phone,
+        phone:       phone.trim(),
         amount:      fee,
-        accountRef:  `OB-${tenant.id}`,
-        description: "School Onboarding",
+        accountRef:  `OB${agent.id}-${tenant.id}`,   // prefix "OB" = onboarding fee
+        description: "School Onboard",
       });
 
       if (darajaRes.ResponseCode === "0") {
         checkoutRequestId = darajaRes.CheckoutRequestID;
 
-        // Store context for callback — onboarding fees don't credit wallet
+        // Store in shared map so mpesa.controller stkCallback
+        // knows this is an onboarding fee (log only, no wallet credit)
         pendingOnboarding.set(checkoutRequestId, {
           agentId:       agent.id,
           agentWalletId: agentWallet.id,
           tenantId:      tenant.id,
           amount:        fee,
         });
+      } else {
+        // Daraja rejected — log fee as failed
+        await prisma.agentTransaction.create({
+          data: {
+            walletId:      agentWallet.id,
+            type:          "SCHOOL_ONBOARDING_FEE",
+            amount:        fee,
+            description:   `Onboarding fee for ${tenantName} — STK push rejected`,
+            reference:     `OB${agent.id}-${tenant.id}`,
+            balanceBefore: agentWallet.balance,
+            balanceAfter:  agentWallet.balance,   // balance unchanged
+          },
+        });
       }
     } catch (darajaErr) {
-      // STK push failed — school still created, just log fee as PENDING manually
+      // Daraja unreachable — log fee as failed, school still created
       console.error("[createSchool] STK push error:", darajaErr?.response?.data ?? darajaErr.message);
-
       await prisma.agentTransaction.create({
         data: {
           walletId:      agentWallet.id,
           type:          "SCHOOL_ONBOARDING_FEE",
           amount:        fee,
-          description:   `Onboarding fee for ${tenantName} — payment failed`,
-          reference:     `OB-${tenant.id}`,
+          description:   `Onboarding fee for ${tenantName} — M-Pesa unreachable`,
+          reference:     `OB${agent.id}-${tenant.id}`,
           balanceBefore: agentWallet.balance,
-          balanceAfter:  agentWallet.balance,  // balance unchanged
+          balanceAfter:  agentWallet.balance,
         },
       });
     }
@@ -288,94 +294,30 @@ export const createSchool = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: checkoutRequestId
-        ? "School created. Enter your M-Pesa PIN to complete payment."
-        : "School created. Payment could not be initiated — please retry.",
+        ? "School created. Enter your M-Pesa PIN to complete the onboarding fee payment."
+        : "School created. M-Pesa payment could not be initiated — please contact support.",
       data: {
         tenantId:   tenant.id,
         tenantName: tenant.name,
         county:     tenant.address,
       },
-      checkoutRequestId,  // frontend polls this for payment status
+      checkoutRequestId,
     });
   } catch (err) {
-    console.error("[agent.createSchool]", err);
-    return res.status(500).json({ success: false, message: "Failed to create school." });
-  }
-};
+    console.error("[agent.createSchool] Error:", err);
 
-/* ============================================================
-   POST /api/mpesa/onboarding-callback  (called internally)
-   Handle STK callback for onboarding fee.
-   Does NOT credit AgentWallet — only logs AgentTransaction.
-============================================================ */
-export const handleOnboardingCallback = async (checkoutRequestId, resultCode, paidAmount, receipt) => {
-  const ctx = pendingOnboarding.get(checkoutRequestId);
-  if (!ctx) return;
-
-  pendingOnboarding.delete(checkoutRequestId);
-
-  const balanceBefore = (await prisma.agentWallet.findUnique({
-    where: { id: ctx.agentWalletId }, select: { balance: true },
-  }))?.balance ?? 0;
-
-  await prisma.agentTransaction.create({
-    data: {
-      walletId:      ctx.agentWalletId,
-      type:          "SCHOOL_ONBOARDING_FEE",
-      amount:        paidAmount,
-      description:   resultCode === 0
-        ? `Onboarding fee — school ${ctx.tenantId} — receipt: ${receipt}`
-        : `Onboarding fee FAILED (code ${resultCode}) — school ${ctx.tenantId}`,
-      reference:     receipt ?? checkoutRequestId,
-      balanceBefore,
-      balanceAfter:  balanceBefore,  // ← balance does NOT change
-    },
-  });
-
-  console.log(`[onboarding] ${resultCode === 0 ? "✅" : "❌"} Fee ${paidAmount} logged for school ${ctx.tenantId}`);
-};
-
-/* expose map for mpesa controller to check */
-export { pendingOnboarding };
-
-/* ============================================================
-   POST /api/agents/wallet/topup  (manual admin credit)
-   Role: ADMIN | SYSTEM_ADMIN
-   Body: { agentId, amount }
-============================================================ */
-export const adminCreditAgentWallet = async (req, res) => {
-  try {
-    const role = req.user?.role?.toUpperCase();
-    if (!["ADMIN", "SYSTEM_ADMIN"].includes(role)) {
-      return res.status(403).json({ success: false, message: "ADMIN only." });
+    // Surface useful error messages
+    if (err.code === "P2002") {
+      return res.status(409).json({
+        success: false,
+        message: "A school or user with these details already exists.",
+      });
     }
 
-    const agentId = Number(req.body?.agentId);
-    const amount  = Number(req.body?.amount);
-
-    if (!Number.isFinite(agentId) || agentId <= 0) {
-      return res.status(400).json({ success: false, message: "Valid agentId is required." });
-    }
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ success: false, message: "Valid amount is required." });
-    }
-
-    const wallet = await creditAgentWallet({
-      agentId,
-      amount,
-      type:        "TOPUP",
-      description: `Manual credit by admin ${req.user.id}`,
-      reference:   `admin-credit-${Date.now()}`,
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create school. Please try again.",
     });
-
-    return res.status(200).json({
-      success: true,
-      message: `KES ${amount} credited to agent wallet.`,
-      balance: wallet.balance,
-    });
-  } catch (err) {
-    console.error("[agent.adminCreditAgentWallet]", err);
-    return res.status(500).json({ success: false, message: "Failed to credit wallet." });
   }
 };
 
@@ -388,9 +330,9 @@ export const getProfile = async (req, res) => {
     const agent = await prisma.agent.findFirst({
       where:   { userId: req.user.id },
       include: {
-        user:    { select: { id: true, name: true, email: true, phone: true } },
-        wallet:  { select: { balance: true } },
-        tenants: { include: { tenant: { select: { id: true, name: true } } } },
+        user:   { select: { id: true, name: true, email: true, phone: true } },
+        wallet: { select: { balance: true } },
+        tenants: { select: { tenant: { select: { id: true, name: true } } } },
       },
     });
 
@@ -414,5 +356,47 @@ export const getProfile = async (req, res) => {
   } catch (err) {
     console.error("[agent.getProfile]", err);
     return res.status(500).json({ success: false, message: "Failed to fetch profile." });
+  }
+};
+
+/* ============================================================
+   POST /api/agents/wallet/topup
+   Admin manually credits an agent wallet.
+   Role: ADMIN | SYSTEM_ADMIN
+   Body: { agentId: number, amount: number }
+============================================================ */
+export const adminCreditAgentWallet = async (req, res) => {
+  try {
+    const role = req.user?.role?.toUpperCase();
+    if (!["ADMIN", "SYSTEM_ADMIN"].includes(role)) {
+      return res.status(403).json({ success: false, message: "ADMIN only." });
+    }
+
+    const agentId = Number(req.body?.agentId);
+    const amount  = Number(req.body?.amount);
+
+    if (!Number.isFinite(agentId) || agentId <= 0) {
+      return res.status(400).json({ success: false, message: "Valid agentId is required." });
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, message: "Valid amount is required." });
+    }
+
+    const wallet = await creditAgentWallet({
+      agentId,
+      amount,
+      type:        "TOPUP",
+      description: `Manual credit by admin ${req.user.id}`,
+      reference:   `admin-${Date.now()}`,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `KES ${amount} credited to agent wallet.`,
+      balance: wallet.balance,
+    });
+  } catch (err) {
+    console.error("[agent.adminCreditAgentWallet]", err);
+    return res.status(500).json({ success: false, message: "Failed to credit wallet." });
   }
 };
