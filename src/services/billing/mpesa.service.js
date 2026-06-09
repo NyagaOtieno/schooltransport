@@ -154,8 +154,8 @@ export const registerC2BUrls = async (responseType = "Completed") => {
     {
       ShortCode:       C2B_SHORTCODE,
       ResponseType:    responseType,
-      ConfirmationURL: `${CALLBACK_BASE}/api/mpesa/c2b/confirm`,
-      ValidationURL:   `${CALLBACK_BASE}/api/mpesa/c2b/validate`,
+     ConfirmationURL: `${CALLBACK_BASE}/c2b/confirm`,
+     ValidationURL: `${CALLBACK_BASE}/c2b/validate`,
     },
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -208,8 +208,8 @@ export const initiateB2C = async ({
       PartyA:             B2C_SHORTCODE,
       PartyB:             normalizePhone(phone),
       Remarks:            remarks,
-      QueueTimeOutURL:    `${CALLBACK_BASE}/api/mpesa/b2c/timeout`,
-      ResultURL:          `${CALLBACK_BASE}/api/mpesa/b2c/callback`,
+      QueueTimeOutURL:    `${CALLBACK_BASE}/mpesa/b2c/timeout`,
+      ResultURL:          `${CALLBACK_BASE}/mpesa/b2c/callback`,
       Occasion:           occasion,
     },
     { headers: { Authorization: `Bearer ${token}` } }
