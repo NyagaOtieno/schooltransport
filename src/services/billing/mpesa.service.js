@@ -154,8 +154,8 @@ export const registerC2BUrls = async (responseType = "Completed") => {
     {
       ShortCode:       C2B_SHORTCODE,
       ResponseType:    responseType,
-     ConfirmationURL: `${CALLBACK_BASE}/c2b/confirm`,
-     ValidationURL: `${CALLBACK_BASE}/c2b/validate`,
+     ConfirmationURL: `${CALLBACK_BASE}/api/mpesa/c2b/confirmation`,
+     ValidationURL: `${CALLBACK_BASE}/api/mpesa/c2b/validation`
     },
     { headers: { Authorization: `Bearer ${token}` } }
   );
