@@ -117,7 +117,7 @@ export const initiateSTKPush = async ({
       PhoneNumber:       normalizePhone(phone),
       CallBackURL:       `${CALLBACK_BASE}/api/mpesa/stk-callback`,
       AccountReference:  String(accountRef).slice(0, 12),
-      TransactionDesc:   String(description).slice(0, 13),
+      TransactionDesc:   String(description).slice(0, 100),
     },
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -161,7 +161,7 @@ export const registerC2BUrls = async (responseType = "Completed") => {
   const token = await getAccessToken();
 
   const { data } = await axios.post(
-    `${BASE_URL}/mpesa/c2b/v1/registerurl`,
+    `${BASE_URL}/mpesa/c2b/v2/registerurl`,
     {
       ShortCode:       C2B_SHORTCODE,
       ResponseType:    responseType,
@@ -179,9 +179,12 @@ export const registerC2BUrls = async (responseType = "Completed") => {
    Simulates a parent paying via M-Pesa menu → paybill number.
    BillRefNumber should be "TRK{userId}" (e.g. "TRK42").
 ============================================================ */
+
 export const simulateC2B = async ({ phone, amount, billRef = "TEST" }) => {
   const token = await getAccessToken();
-
+ if (!IS_SANDBOX) {
+   throw new Error("C2B simulation is only available in sandbox");
+}
   const { data } = await axios.post(
     `${BASE_URL}/mpesa/c2b/v1/simulate`,
     {
@@ -268,7 +271,7 @@ export const initiateB2B = async ({
       SecurityCredential:      B2B_CREDENTIAL,
       CommandID:               commandId,
       SenderIdentifierType:    senderIdentifier,
-      RecieverIdentifierType:  receiverIdentifier,
+      ReceiverIdentifierType: receiverIdentifier,
       Amount:                  Math.ceil(amount),
       PartyA:                  B2B_SHORTCODE,
       PartyB:                  String(receiverShortcode),
@@ -282,4 +285,32 @@ export const initiateB2B = async ({
 
   return data;
   // Returns: { ConversationID, OriginatorConversationID, ResponseCode, ResponseDescription }
+};
+
+export const queryTransactionStatus = async ({
+   transactionId,
+   identifierType = 4
+}) => {
+   const token = await getAccessToken();
+
+   return axios.post(
+      `${BASE_URL}/mpesa/transactionstatus/v1/query`,
+      {
+         Initiator: B2C_INITIATOR,
+         SecurityCredential: B2C_CREDENTIAL,
+         CommandID: "TransactionStatusQuery",
+         TransactionID: transactionId,
+         PartyA: B2C_SHORTCODE,
+         IdentifierType: identifierType,
+         ResultURL: `${CALLBACK_BASE}/api/mpesa/status/callback`,
+         QueueTimeOutURL: `${CALLBACK_BASE}/api/mpesa/status/timeout`,
+         Remarks: "Status Query",
+         Occasion: ""
+      },
+      {
+         headers: {
+            Authorization: `Bearer ${token}`
+         }
+      }
+   );
 };
