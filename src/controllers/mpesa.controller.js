@@ -261,11 +261,67 @@ export const stkCallback = async (req, res) => {
       ]);
       console.log(`[stkCallback] ✅ AgentWallet ${p.agentWalletId} +KES ${finalAmount}`);
     } else {
+      // ── Parent wallet top-up ──────────────────────────────────────────────
+      // 1. Credit parent wallet + mark transaction SUCCESS
       await prisma.$transaction([
         prisma.wallet.update({ where: { id: p.walletId }, data: { balance: { increment: finalAmount } } }),
         prisma.transaction.update({ where: { id: p.transactionId }, data: { amount: finalAmount, status: "SUCCESS", reference: receipt ?? checkoutRequestId } }),
       ]);
       console.log(`[stkCallback] ✅ Wallet ${p.walletId} +KES ${finalAmount}`);
+
+      // 2. 20% commission to the agent who onboarded this parent's school ──
+      try {
+        const COMMISSION_RATE = 0.20;
+        const commissionAmt   = Math.floor(finalAmount * COMMISSION_RATE * 100) / 100; // floor to 2dp
+
+        // Resolve parentId (p may have parentId or clientId)
+        let parentRec = p.parentId
+          ? await prisma.parent.findUnique({ where: { id: p.parentId }, select: { tenantId: true } })
+          : null;
+        if (!parentRec && p.clientId) {
+          const client = await prisma.client.findUnique({ where: { id: p.clientId }, select: { tenantId: true } });
+          parentRec = client ? { tenantId: client.tenantId } : null;
+        }
+        if (!parentRec?.tenantId) throw new Error("no tenantId");
+
+        // Find the agent who onboarded this tenant
+        const agentTenant = await prisma.agentTenant.findFirst({
+          where:  { tenantId: parentRec.tenantId },
+          select: { agentId: true },
+        });
+        if (!agentTenant?.agentId) throw new Error("no agent for tenant");
+
+        // Get or create agent wallet
+        let agentWallet = await prisma.agentWallet.findUnique({ where: { agentId: agentTenant.agentId } });
+        if (!agentWallet) {
+          agentWallet = await prisma.agentWallet.create({ data: { agentId: agentTenant.agentId, balance: 0 } });
+        }
+
+        const balBefore = agentWallet.balance;
+        const balAfter  = balBefore + commissionAmt;
+
+        await prisma.$transaction([
+          prisma.agentWallet.update({
+            where: { id: agentWallet.id },
+            data:  { balance: { increment: commissionAmt } },
+          }),
+          prisma.agentTransaction.create({
+            data: {
+              walletId:      agentWallet.id,
+              type:          "COMMISSION",
+              amount:        commissionAmt,
+              description:   `20% commission on parent top-up KES ${finalAmount} — receipt: ${receipt ?? checkoutRequestId}`,
+              reference:     `comm-${receipt ?? checkoutRequestId}`,
+              balanceBefore: balBefore,
+              balanceAfter:  balAfter,
+            },
+          }),
+        ]);
+        console.log(`[stkCallback] ✅ Commission KES ${commissionAmt} → Agent ${agentTenant.agentId}`);
+      } catch (commErr) {
+        // Commission failure must NOT affect parent top-up (already committed above)
+        console.warn("[stkCallback] Commission credit skipped:", commErr.message);
+      }
     }
   } catch (err) {
     console.error("[stkCallback]", err);
