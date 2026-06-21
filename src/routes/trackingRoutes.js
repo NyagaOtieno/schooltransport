@@ -97,6 +97,52 @@ router.get("/bus-locations", rateLimit, async (req, res) => {
 });
 
 /* ============================================================
+   GET /api/tracking/student/:studentId/status
+   FREE — returns boarding status only (no wallet deduction).
+   Used for: status badge, notifications, report.
+   Returns: { tripStatus: "ONBOARD"|"OFFBOARD"|"NOT_BOARDED", manifestId, session }
+============================================================ */
+router.get("/student/:studentId/status", rateLimit, async (req, res) => {
+  try {
+    const tenantId  = Number(req.user?.tenantId);
+    const studentId = Number(req.params.studentId);
+
+    if (!tenantId)                   return fail(res, 403, "Token missing tenantId.");
+    if (!Number.isFinite(studentId)) return fail(res, 400, "Invalid studentId.");
+
+    const student = await prisma.student.findFirst({
+      where:  { id: studentId, tenantId },
+      select: { id: true },
+    });
+    if (!student) return fail(res, 404, "Student not found.");
+
+    // Get today's most recent manifest
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const manifest = await prisma.manifest.findFirst({
+      where:   { studentId, createdAt: { gte: today } },
+      orderBy: { createdAt: "desc" },
+      select:  { id: true, status: true, session: true, createdAt: true },
+    });
+
+    if (!manifest) {
+      return ok(res, { tripStatus: "NOT_BOARDED", manifestId: null, session: null });
+    }
+
+    const tripStatus =
+      manifest.status === "CHECKED_IN"  ? "ONBOARD"
+      : manifest.status === "CHECKED_OUT" ? "OFFBOARD"
+      : "NOT_BOARDED";
+
+    return ok(res, { tripStatus, manifestId: manifest.id, session: manifest.session, status: manifest.status });
+  } catch (err) {
+    console.error("[tracking/student/status]", err);
+    return fail(res, 500, "Failed to fetch status.");
+  }
+});
+
+/* ============================================================
    GET /api/tracking/student/:studentId
    Live bus location for a parent's child.
 
@@ -153,12 +199,25 @@ router.get(
       });
 
       if (!manifest) {
-        return ok(res, { location: null, status: "No trip found" });
+        return ok(res, { location: null, status: "No trip found", tripStatus: "NOT_BOARDED" });
+      }
+
+      // ── Status mapping — explicit for frontend ────────────
+      if (manifest.status === "CHECKED_OUT") {
+        return ok(res, {
+          location:   null,
+          status:     "Dropped off",
+          tripStatus: "OFFBOARD",
+          bus:        manifest.busId ? await prisma.bus.findFirst({
+            where:  { id: manifest.busId, tenantId },
+            select: { id: true, name: true, plateNumber: true },
+          }) : null,
+        });
       }
 
       // ── Boarding check ───────────────────────────────────
       if (manifest.status !== "CHECKED_IN") {
-        return ok(res, { location: null, status: "Not onboarded" });
+        return ok(res, { location: null, status: "Not onboarded", tripStatus: "NOT_BOARDED" });
       }
 
       // ── Resolve bus ──────────────────────────────────────
@@ -194,6 +253,7 @@ router.get(
 
         return ok(res, {
           status:   isRecent ? "On trip" : "On trip (manifest coords)",
+          tripStatus: "ONBOARD",
           bus,
           location: live,
           walletDeducted: req.walletDeducted ?? false,
@@ -205,6 +265,7 @@ router.get(
       if (manifest.latitude != null && manifest.longitude != null) {
         return ok(res, {
           status: "On trip (manifest coords)",
+          tripStatus: "ONBOARD",
           bus,
           location: {
             lat:        manifest.latitude,
@@ -218,8 +279,9 @@ router.get(
       }
 
       return ok(res, {
-        location: null,
-        status:   "On trip, but no location data yet",
+        location:   null,
+        status:     "On trip, but no location data yet",
+        tripStatus: "ONBOARD",
         bus,
       });
 
